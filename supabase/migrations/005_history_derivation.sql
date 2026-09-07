@@ -87,7 +87,7 @@ select
   max(bs.battery_level) as soc_max,
   max(bs.odometer_km) - min(bs.odometer_km) as distance_km,
   -- Net energy is only inferred where the provider reported it; otherwise NULL, so
-  -- the UI shows "недоступно" instead of a fabricated consumption number.
+  -- the UI shows "unavailable" instead of a fabricated consumption number.
   sum(case when bs.charging_state = 'Charging' then bs.charge_energy_added end) as charged_kwh
 from public.battery_snapshots bs
 join public.vehicles v on v.id = bs.vehicle_id

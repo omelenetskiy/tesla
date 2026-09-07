@@ -6,7 +6,7 @@ import { createAuthorizationRequest, decodeTeslaToken, verifyAccessToken } from 
 import { readCredential, saveTokenSet } from '@/lib/tesla/tokens'
 import { syncVehiclesFromList } from '@/lib/tesla/service'
 import { TeslaClient } from '@/lib/tesla/client'
-import { teslaConfig } from '@/lib/tesla/config'
+import { authBaseForHost, teslaConfig } from '@/lib/tesla/config'
 import { recordRequest } from '@/lib/tesla/request-log'
 
 export const dynamic = 'force-dynamic'
@@ -45,29 +45,29 @@ type ConnectBody = { accessToken?: string; refreshToken?: string }
  */
 export async function POST(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
 
   let body: ConnectBody
   try {
     body = await request.json() as ConnectBody
   } catch {
-    return NextResponse.json({ message: 'Некорректное тело запроса' }, { status: 400 })
+    return NextResponse.json({ message: 'Malformed request body' }, { status: 400 })
   }
   const accessToken = body.accessToken?.trim()
   const refreshToken = body.refreshToken?.trim()
   if (!accessToken || !refreshToken) {
-    return NextResponse.json({ message: 'Нужны обе строки: access token и refresh token из Tesla Auth' }, { status: 400 })
+    return NextResponse.json({ message: 'Both fields are required: the access token and the refresh token from Tesla Auth' }, { status: 400 })
   }
 
   let claims: ReturnType<typeof decodeTeslaToken>
   try {
     claims = decodeTeslaToken(accessToken)
   } catch (error) {
-    return NextResponse.json({ message: error instanceof Error ? error.message : 'Токен не разбирается как JWT' }, { status: 400 })
+    return NextResponse.json({ message: error instanceof Error ? error.message : 'The token does not parse as a JWT' }, { status: 400 })
   }
   if (claims.azp && claims.azp !== teslaConfig.clientId) {
     return NextResponse.json({
-      message: `Токен выдан клиентом «${claims.azp}», а Owner API принимает ownerapi. Сгенерируйте пару заново в Tesla Auth.`,
+      message: `The token was issued to client "${claims.azp}", but the Owner API accepts ownerapi. Generate the pair again in Tesla Auth.`,
       reason: 'wrong_client_id',
     }, { status: 422 })
   }
@@ -75,10 +75,10 @@ export async function POST(request: Request) {
   // Liveness first: SSO answers even when the Owner API host itself is gated, which
   // is the difference between "bad credentials" and "Tesla closed this route".
   const authHost = claims.iss ? safeHost(claims.iss) : null
-  const verified = await verifyAccessToken(accessToken, authHost ? `https://${authHost}${teslaConfig.authPath}` : undefined)
+  const verified = await verifyAccessToken(accessToken, authBaseForHost(authHost))
   if (!verified.ok) {
     return NextResponse.json({
-      message: `Tesla отклонила access token (${verified.status}). Обновите пару токенов в Tesla Auth.`,
+      message: `Tesla rejected the access token (${verified.status}). Refresh the token pair in Tesla Auth.`,
       reason: 'token_rejected',
     }, { status: 422 })
   }
@@ -96,9 +96,9 @@ export async function POST(request: Request) {
     vehicleSync = { count: synced.count, status: 'ok', reason: null }
   } catch (error) {
     if (error instanceof TeslaApiError && error.kind === 'forbidden') {
-      vehicleSync = { count: 0, status: 'unavailable', reason: 'Tesla закрыла доступ к Owner API для этого токена (403). Учётные данные сохранены — как только доступ вернётся, сбор заработает.' }
+      vehicleSync = { count: 0, status: 'unavailable', reason: 'Tesla has closed Owner API access for this token (403). The credentials are stored — collection starts working again as soon as access returns.' }
     } else {
-      vehicleSync = { count: 0, status: 'unavailable', reason: error instanceof Error ? error.message.slice(0, 200) : 'Список автомобилей не получен' }
+      vehicleSync = { count: 0, status: 'unavailable', reason: error instanceof Error ? error.message.slice(0, 200) : 'The vehicle list was not fetched' }
     }
   }
 
@@ -122,7 +122,7 @@ export async function POST(request: Request) {
     vehicles: vehicleSync,
     tokenClaims: { azp: claims.azp, scopes: claims.scp, expiresAt: claims.exp ? new Date(claims.exp * 1000).toISOString() : null },
     message: vehicleSync.status === 'ok'
-      ? `Tesla подключена. Найдено автомобилей: ${vehicleSync.count}.`
+      ? `Tesla connected. Vehicles found: ${vehicleSync.count}.`
       : vehicleSync.reason,
   })
 }
@@ -145,7 +145,7 @@ async function firstVehicleId(ownerId: string): Promise<string | null> {
 /**
  * When the vehicle list is unavailable we still need a row to hang the credential
  * on, because `vehicle_credentials.vehicle_id` references `vehicles.id`. The row is
- * marked so the UI can show «автомобиль не подтверждён» instead of inventing one.
+ * marked so the UI can show an "unverified vehicle" instead of inventing one.
  */
 async function createPlaceholderVehicle(ownerId: string): Promise<string | null> {
   const { getSupabaseAdmin } = await import('@/lib/supabase')
@@ -153,7 +153,7 @@ async function createPlaceholderVehicle(ownerId: string): Promise<string | null>
   const { data, error } = await supabase.from('vehicles').insert({
     owner_id: ownerId,
     provider_vehicle_id: `pending:${Date.now()}`,
-    display_name: 'Tesla (не подтверждён)',
+    display_name: 'Tesla (unverified)',
     model: null,
   }).select('id').single()
   if (error || !data) return null
@@ -163,7 +163,7 @@ async function createPlaceholderVehicle(ownerId: string): Promise<string | null>
 /** §16 connection status for the /connect screen. */
 export async function DELETE(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const { getSupabaseAdmin } = await import('@/lib/supabase')
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('vehicle_credentials').delete().eq('owner_id', user.id)
@@ -174,7 +174,7 @@ export async function DELETE(request: Request) {
 /** Re-read the stored credential's shape without exposing it (§16 "Tesla connected"). */
 export async function PUT(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const { listVehicleRows } = await import('@/lib/tesla/service')
   const rows = await listVehicleRows(user.id)
   const credential = rows[0] ? await readCredential(rows[0].id, user.id) : null

@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   const authorization = request.headers.get('authorization') ?? ''
   const bearer = authorization.replace(/^Bearer\s+/i, '')
   if (!process.env.COLLECTION_CRON_SECRET || !secretMatches(bearer)) {
-    return NextResponse.json({ message: 'Неверный ключ сбора данных' }, { status: 401 })
+    return NextResponse.json({ message: 'Invalid collection key' }, { status: 401 })
   }
 
   const rows = await listAllVehicleRows()

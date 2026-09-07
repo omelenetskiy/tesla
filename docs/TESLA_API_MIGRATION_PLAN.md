@@ -184,3 +184,143 @@ Because D1/D2 currently yield 403, the console's first real job is to let you mi
 3. `AGENTS.md` and `PRODUCT.md` are **deleted in the working tree** (tracked at HEAD). I treated AGENTS.md's sleep-safety and RLS rules as still binding. If the deletion was unintentional, say so and I'll restore them from `git show HEAD:AGENTS.md`.
 4. Mixed-language error strings today (Russian UI + English messages/labels). Under D3 I will normalise user-facing copy to Russian and keep enum values (`Driving`, `Charging`) internal.
 5. Supabase migrations: **files only** unless you explicitly authorise applying them (D6).
+
+---
+
+## 11. Execution results — P4–P7b (as of 2026-09-08)
+
+Verification gate: `npm run verify` **75/75 checks pass** · `tsc --noEmit` clean · `npm run lint` clean · `npm run build` green (13 routes).
+
+### Built
+
+`lib/tesla/` — `config` `errors` `models` `normalize` `sanitize` `client` `provider` `tokens` `auth` `request-log` `service` `history` `catalog` `debug-runner` `compat`.
+Routes — `/api/vehicle` `/api/vehicles` `/api/history` `/api/collect` `/api/tesla/connect` `/api/tesla/auth/complete` `/api/debug/{request,logs,diagnostics}`.
+UI — `/debug/api` (catalog · request editor · response inspector · history · diagnostics), `components/ui/*` (Button, Badge, Tabs, Select, Input, Tooltip), `components/json/json-viewer.tsx`.
+Schema — `004_core_models.sql`, `005_history_derivation.sql` (written, **not applied**).
+Harness — `scripts/verify-tesla.mts` + a dependency-free TS module resolver, wired as `npm run verify`.
+
+### Audit items closed
+
+E1 (wake GET→POST) · E2/E3 (one `{id}` rule, `owner_api_id` vs `vehicle_id`) · E4 (password/MFA scraper deleted; `lib/tesla-auth.ts` is now a re-export shim) · E5 (scopes trimmed to the three documented) · E6 (issuer-driven region on refresh) · E7 (single config layer) · E8 (typed errors; 401 refreshes, **403 provably does not**) · E9 (bounded backoff + `Retry-After`) · E11 (units contract) · E12 (all vehicles synced, not `vehicles[0]`) · F1 (freshness derived at read time) · F2 (no strings in stored state) · F3 (§13 models) · F4 (persisted history + provenance) · F5/F8 (cache-first reads, typed columns) · F6 (`VehicleDataProvider`) · F7 (`RequestLog` + redaction).
+
+### Defects found *while implementing*, beyond the original audit
+
+1. **`mergeVehicleData` crashed on a sleeping vehicle** — `(null).vehicle_config` when no telemetry was fetched, i.e. the one path that runs most. Caught by check #48 in the harness, not by the compiler.
+2. **`time_to_full_charge` (hours) was treated as minutes** — my own repeat of the E11 class of error, caught by a check I wrote to catch it.
+3. **The polling gate could never bootstrap** — with zero snapshots, presence is unknown, which resolved to the `offline` rule and refused even the cheap, non-waking status probe. Result: the collector would skip forever on a fresh install. Confirmed live: `/api/collect` returned `skipped / policy_disallows_telemetry` and made no request. Semantics split into `probeAllowed` (cadence-gated) vs telemetry (decided by the client from `state === 'online'`).
+4. **`/api/collect` was unreachable by design** — the auth middleware redirected it to `/login`, so the documented Netlify scheduler could never have run it. Verified before the fix (307) and after (401 on a wrong secret, real run on the right one).
+5. **408 was misclassified as a server fault** — which made it retryable; retrying Tesla's "vehicle is asleep" answer is a wake attempt dressed as a read. Now its own `vehicle_unavailable` kind, terminal.
+
+### Two facts that bound what can be claimed
+
+- **Live telemetry is still not working**, and nothing in this changes that: the Owner API 403 gate is measured and reproduced (`docs` §1). `vehicle_states` remains at 0 rows. The debug console is the instrument for the next step — mint a fresh pair in Tesla Auth, paste it, and re-run the authentication group.
+- **The live vehicle row is `collection_mode: 'passive'`**, which now resolves explicitly to a policy that makes **no Tesla requests at all** (the original README promise). The dashboard will stay empty until that is switched to `conservative`/`on_demand` — deliberately not changed silently.
+
+### Still pending
+
+PHASE 8–10 (the product redesign) are gated on the screenshots (D5). `lib/tesla/compat.ts` exists only to keep today's dashboard rendering and is deleted with P8.
+
+---
+
+## 12. PHASE 8–9 execution — redesign delivered (screenshots received 2026-09-08)
+
+Gate: `npm run lint` **0 problems** · `npm run build` green (**18 routes**) · `npm run verify` **107/107**.
+
+### What the reference screens actually dictated
+
+Adopted as structure, not copied as content:
+
+| Reference element | Where it went |
+|---|---|
+| Light-gray page with one large white rounded container | `AppShell` — the whole product lives in one container, not edge-to-edge chrome |
+| Big near-black title + inline text filters beneath | Header: `Обзор` + borderless vehicle dropdown (text + chevron), no boxed `<select>` |
+| Icon segmented control, top-right, active = white on gray | Became the **primary navigation** (Обзор / Поездки / Батарея / Зарядка) — better for one-thumb in-car use than a sidebar |
+| Floating legend card over the map | `MapLegend` |
+| Floating vehicle card: thumbnail + name + subtitle, then icon-left rows, no dividers | `VehicleContextCard` — battery, range, power, position, updated-ago |
+| **Directional arrow markers**, selected one blue with a soft halo | Replaced my first dot-with-cone attempt; arrow SVG rotated to `heading`, halo on selection |
+| Ring gauge: thick arc, **gapped segments**, rounded caps, number centred | `Gauge` / `SegmentGauge` (hand-drawn SVG, not a chart library) |
+| Grouped bars, dotted gridlines, legend with right-aligned underlined totals | `EnergyChart`, `ChargePowerChart`; underline detail kept in `SegmentGauge` |
+| Royal blue, not generic SaaS blue | `--blue` retuned `#3b82f6 → #2563eb` |
+
+Numbers, VINs, places and dates in the screenshots were not reused; all copy is original and Russian (D3).
+
+### Pages delivered
+
+`/` Dashboard (§7 order: header → map → live summary → recent activity; no 4-card grid), `/trips` master-detail with confidence provenance and progressive Battery/Speed/Power tabs (§8), `/battery` gauge + 24h/7d/30d/90d history + figures + **degradation hidden below 30 snapshots** (§9), `/charging` dominant live session else history (§10), `/settings` collection-mode control with stated battery impact.
+
+`lib/format.ts` is now the only place that emits Russian text or units — the defect where translated strings were baked into stored snapshots (F2) is structurally closed, and `npm run verify` pins 27 of its behaviours including Russian pluralisation (`1 минуту / 22 минуты / 45 минут`).
+
+### Additional defects found in this phase
+
+1. **`Inter` was loaded with `subsets: ['latin']`** on an entirely Russian UI — every Cyrillic glyph silently fell back to the system font, changing metrics and weight across the whole app. Now `latin + cyrillic + cyrillic-ext`.
+2. **My migration 004 overrode the user's `passive` choice.** `polling_profile NOT NULL DEFAULT 'default'` meant every existing row got `'default'`, and the resolver preferred that column — so applying the migrations turned a passive vehicle into one issuing live probes (visible as `collection_events` 10–11: two real 403 requests). Fixed by `006_…sql` (nullable, no default, clears the value the default wrote) plus a precedence regression check.
+3. **My 004 secret-CHECK rejected legitimate log rows**: it matched the *key name* `refresh_token`, but the sanitizer preserves key names and redacts values, so `"refresh_token":"[REDACTED]"` violated it and the insert failed silently — losing exactly the rows §41 needs. Constraint now matches credential *shapes*.
+4. **`api_request_logs` rows had no `owner_id`**, so the RLS select policy hid a user's own history from them. Now attributed, with a backfill in 006.
+5. **React-Compiler rejected 7 patterns** in my new pages (setState in effect bodies, `Date.now()` during render, reassignment during render). Fixed properly rather than suppressed — including `lib/hooks/use-now.ts`, which makes relative timestamps actually advance instead of freezing at first render.
+
+### Action required by the operator
+
+`supabase/migrations/006_fix_polling_precedence_and_log_constraints.sql` is **written but not applied**. Until it is run, the live vehicle keeps the `'default'` profile the 004 default wrote and will continue issuing live Owner API requests despite `collection_mode = 'passive'`.
+
+> Applied by the operator on 2026-09-08. Closed.
+
+## 13. PHASE 10 — the two defects that made the API look dead (2026-09-08)
+
+The report was "authorization and vehicle data still do not work; I saw a live status once and then nothing". Two independent defects in my own code explain that exactly. Neither is a Tesla platform gate, and the HTTP/2 theory from §12 was **not** the cause.
+
+### G1 — every OAuth URL was composed with the version path twice
+
+`teslaConfig.authOrigin` is `https://auth.tesla.com` (no path), while `authOriginForIssuer()` returned `https://auth.tesla.com/oauth2/v3` (path included). Both were named "authOrigin", and each caller appended `teslaConfig.authPath` again:
+
+| Call | Composed URL actually requested |
+| --- | --- |
+| `refreshTokens` with a stored `auth_host` | `…/oauth2/v3/oauth2/v3/token` |
+| `exchangeAuthorizationCode` with an `issuer` on the callback | `…/oauth2/v3/oauth2/v3/token` |
+| `verifyAccessToken` from `/connect`, `diagnoseAuth`, the auth probe | `…/oauth2/v3/oauth2/v3/userinfo` |
+
+`exchangeAuthorizationCode` additionally sent `redirect_uri = https://auth.tesla.com/oauth2/v3/void/callback` while `buildAuthorizationUrl` sent `https://auth.tesla.com/void/callback` — a mismatch Tesla rejects on its own.
+
+This explains the reported shape of the failure precisely: a **freshly pasted** token pair worked (no userinfo path bug on the `iss`-absent branch, no refresh needed), and once the access token aged out, refresh hit a 404 and nothing recovered. It also means `/connect` rejected valid tokens with "Tesla rejected the access token (404)".
+
+Fix: one contract — every Tesla OAuth URL is composed in `config.ts`; `authBaseForHost` / `authBaseForIssuer` return the base *including* the path, `postToken` takes a complete URL and appends nothing. Pinned by 13 checks in `npm run verify`, including idempotence of an issuer that already carries the path.
+
+### G2 — E2 was not actually closed: the long id was still substituted into `{id}`
+
+`service.ts:ownerApiIdOf` fell through to `row.vehicle_id` when the short id was missing, so a row predating `owner_api_id` addressed `/api/1/vehicles/3744651726645272` — a 16-digit streaming identity that is not valid in a path segment. Tesla rejects it, and from the UI that is indistinguishable from a dead credential. §11 listed E2 as closed; the rule was correct in `debug-runner.ts` and wrong in the product's own read path.
+
+Fix: `lib/tesla/identity.ts:resolveOwnerApiId` is now the single rule — a stored short id, else a legacy value only if its shape proves it is short, else `null`. Never the long id. `readVehicleStatus` turns `null` into one `GET /api/1/vehicles` (which needs no id) and persists the short id it finds, so an old row repairs itself instead of failing forever.
+
+### G3 — `state: "active"` was classified as not-awake
+
+`getVehicleStatus` gated the telemetry rollup on `entry.state !== 'online'`, and `normalizeConnectivity` mapped every unrecognised value to `offline`. Both now go through `isVehicleAwake`.
+
+**Honest scoping of this one.** TeslaMate's source (`lib/teslamate/vehicles/vehicle.ex`) compares the state string against exactly `"online"` for awake and `["offline", "asleep"]` for not-awake, logging `unknown vehicle state` for anything else — so `"active"` is **not** a value Tesla sends, and this was not the cause of the outage. The change stands as cheap robustness against an unrecognised value silently reading as "Offline", which is what the operator reported seeing. It is not credited as a fix.
+
+### G4 — request shape on the Owner API host
+
+TeslaMate's Owner API client (`lib/tesla_api.ex`, `middleware/token_auth.ex`) sends exactly two headers on reads: `user-agent: TeslaMate/<version>` and `Authorization: Bearer <token>`. No `Accept`, no `Accept-Language`, no `Content-Type`, and no `vehicle_id` query parameter on `vehicle_data` (it passes `?endpoints=…` to select sections). Given the tracker's own diagnosis — `vide` in #5399: *"Tesla is fingerprinting client requests and responding to the clients they don't like with a FleetAPI scoped token"* — a `Content-Type` on a bodyless GET is an unnecessary oddity. The client now sends it only when there is a body, and logs the headers it actually sent.
+
+### What the TeslaMate evidence confirms about the 403
+
+- `POST https://auth.tesla.com/oauth2/v3/token → 200` **succeeded immediately before** the Owner API 403 in every report (#5384/#5399/#5416), i.e. auth is fine and only data calls are rejected — exactly the split §41's diagnostics were built to show.
+- Fixed in code by **PR #5406** (merged 2026-06-14, released in v4.0.1): `protocols: [:http1, :http2]` + `versions: [:"tlsv1.3"]` on the **`TESLA_AUTH_HOST` pool only**. The `TESLA_API_HOST` pool carries nothing but `size:`. So the fingerprint is the TLS/ALPN characteristics of the **token call**, which is what `postTokenHttp2` implements.
+- `kolsbjerg0055`: a refresh through the HTTP/1.1 adapter yields a token that auth accepts and the Owner API rejects; the same refresh over the other path yields one that works immediately. `longzheng`: *"If it was [TLS] 1.2 it would fail, if it was 1.3 it would succeed."*
+- **A second, non-TLS cause worth checking first** (`kerkeniw` #5419, confirmed by `tommeh1337`): the `vehicle_data` grant must be enabled on the **account** (`accounts.tesla.com → Security`), not only in the app details. It produces the identical `forbidden, see https://developer.tesla.com/docs/fleet-api` body.
+- Owner API is still the default path for personal tokens on `main` as of 2026-09-08 (`TESLA_API_HOST` default `https://owner-api.teslamotors.com`); the only post-June 403 issue in the tracker is #5476 about Fleet `EXCEEDED_LIMIT` backoff. **The Fleet-API migration instruction in the original brief remains both correct and unnecessary** — we are not gated by a platform sunset.
+- TeslaMate has **no `wake_up` call at all** (`TeslaApi` exposes only `get/2`): it wakes a car by shortening the poll interval and waiting for `state == "online"`. Our explicit, confirmation-gated `wakeVehicle` is therefore a deliberate difference, not an omission.
+
+### Also fixed in this phase
+
+- **Debug console history was one refresh behind**: `recordRequest` was fired without awaiting, so the console refetched its history before the insert had landed. The runner now awaits its own audit rows before responding.
+- **History rows were unclickable**: `restoreLog` compared the stored endpoint (`/api/1/vehicles/123/data`) to the catalog path (`/api/1/vehicles/:id/data`) for equality — never true. Now matched by segment pattern.
+- **`runTeslaClientCall` resolved the short id eagerly**, so `GET /api/1/vehicles` — the request that *produces* the id — failed with "no short id" for exactly the rows that needed it. Now resolved lazily, and a successful list run syncs and stores the ids, then refetches the catalog so the inputs are prefilled.
+- **Three `toLocaleString('ru-RU')` calls survived the English-only conversion** in the console, rendering Russian-formatted timestamps. Now `en-US`; the Cyrillic sweep is clean across `app/ lib/ components/ scripts/`.
+- **Map canvas**: MapLibre v6 ships `.maplibregl-map{position:relative}` *outside* any cascade layer, and unlayered CSS beats `@layer utilities` whatever the specificity — so `absolute inset-0` on the container was inert and the element had no height. Not fixable from JSX; sized in `globals.css` instead. This was the real cause of the "canvas is 44px tall" report, confirmed against the operator's own DevTools experiment.
+
+### Operator action
+
+1. Restart the dev server (a long-running one serves stale chunks after route-group moves).
+2. If a 403 survives the fixes above, check the **account** grant before anything else: `accounts.tesla.com → Security` must have the `vehicle_data` scope enabled, not only the app details (#5419). This produces the exact Fleet-API-docs body and no code change can fix it.
+3. Then `/debug/api` → Authentication → **Refresh access token** (this now reaches the right endpoint for the first time, over HTTP/2 + TLS 1.3), and re-check the Diagnostics tab. `Short id stored` and `Owner API responds` should go green without further intervention, because the read path repairs the id itself.
+
+

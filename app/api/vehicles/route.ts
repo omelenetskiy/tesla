@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const vehicles = await listVehicleSummaries(user.id)
   return NextResponse.json({ vehicles, selectedVehicleId: new URL(request.url).searchParams.get('vehicle') ?? vehicles[0]?.identity.databaseId ?? null })
 }

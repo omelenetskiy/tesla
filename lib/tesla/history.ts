@@ -494,9 +494,9 @@ async function tryUpsert(table: string, rows: Array<Record<string, unknown>>, de
 }
 
 /**
- * Builds the §7 «Последние события» feed from history boundaries. Event titles are
- * stable Russian labels stored as `type` + data; only `type` is machine-readable, so
- * a copy change never rewrites history.
+ * Builds the §7 "Recent activity" feed from history boundaries. Rows are stored as a
+ * machine-readable `type` plus a data payload; the display string is produced at render
+ * time, so a copy change never rewrites history.
  */
 function activityEventsFromHistory(vehicleId: string, ownerId: string, bundle: HistoryBundle) {
   const events: Array<Record<string, unknown>> = []

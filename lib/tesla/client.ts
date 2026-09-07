@@ -6,7 +6,7 @@ import {
   retryDelayMs,
 } from './errors'
 import type { ApiRequestLog, VehicleStatus } from './models'
-import { normalizeVehicleStatus, mergeVehicleData, type RawMergedVehicle, type RawVehicleData, type RawVehicleListItem } from './normalize'
+import { normalizeVehicleStatus, mergeVehicleData, isVehicleAwake, type RawMergedVehicle, type RawVehicleData, type RawVehicleListItem } from './normalize'
 import { redactJsonText, sanitizeBody, sanitizeHeaders, sanitizeUrl } from './sanitize'
 
 export type TeslaRequestType = ApiRequestLog['requestType']
@@ -185,7 +185,7 @@ export class TeslaClient {
       try {
         accessToken = await this.deps.getAccessToken()
       } catch (error) {
-        throw new TeslaApiError('invalid_grant', 'Не удалось получить токен доступа Tesla', {
+        throw new TeslaApiError('invalid_grant', 'Failed to obtain a Tesla access token', {
           endpoint,
           method,
           attempts: attempt,
@@ -196,19 +196,25 @@ export class TeslaClient {
       const timeoutMs = options.timeoutMs ?? teslaConfig.requestTimeoutMs
       const timer = setTimeout(() => controller.abort(), timeoutMs)
       const safeUrl = sanitizeUrl(url.toString())
+      const body = options.body === undefined ? undefined : typeof options.body === 'string' ? options.body : JSON.stringify(options.body)
+      const headers: Record<string, string> = {
+        Accept: 'application/json',
+        // Only when there is a body. TeslaMate's Owner API client sends nothing but
+        // `user-agent` and `Authorization`, and the June-2026 403 wave was diagnosed
+        // in its tracker as Tesla rejecting clients whose request shape it does not
+        // like — a `Content-Type` on a bodyless GET is exactly such an oddity.
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        // The community docs make a User-Agent mandatory on every request;
+        // naming the app is the documented courtesy, not an auth factor.
+        'User-Agent': 'DriveScope/1.0 (owner-api monitoring client)',
+        Authorization: `Bearer ${accessToken}`,
+      }
 
       try {
         const response = await this.deps.fetchImpl(url.toString(), {
           method,
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            // The community docs make a User-Agent mandatory on every request;
-            // naming the app is the documented courtesy, not an auth factor.
-            'User-Agent': 'DriveScope/1.0 (owner-api monitoring client)',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: options.body === undefined ? undefined : typeof options.body === 'string' ? options.body : JSON.stringify(options.body),
+          headers,
+          body,
           cache: 'no-store',
           signal: controller.signal,
         })
@@ -231,12 +237,7 @@ export class TeslaClient {
           errorKind: ok ? null : classifyStatus(status, response.headers.get('retry-after')),
           errorMessage: ok ? null : redactJsonText(rawText)?.slice(0, 500) ?? null,
           attempts: attempt,
-          requestHeaders: sanitizeHeaders({
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'DriveScope/1.0',
-            Authorization: `Bearer ${accessToken}`,
-          }),
+          requestHeaders: sanitizeHeaders(headers),
           requestBody: sanitizeBody(options.body),
           responseHeaders: sanitizeHeaders(response.headers),
           responseBody: redactJsonText(rawText),
@@ -257,7 +258,7 @@ export class TeslaClient {
             await this.deps.refreshAccessToken()
             continue // same attempt budget: retry once with the new token
           } catch (refreshError) {
-            throw new TeslaApiError('invalid_grant', 'Токен доступа истёк, а refresh не прошёл', {
+            throw new TeslaApiError('invalid_grant', 'Access token expired and the refresh failed', {
               status,
               endpoint,
               method,
@@ -274,7 +275,7 @@ export class TeslaClient {
 
         if ((kind === 'server' || kind === 'network' || kind === 'timeout') && attempt < maxAttempts) {
           await sleepWithCap(retryDelayMs(attempt, this.deps.random))
-          lastError = new TeslaApiError(kind, 'Tesla вернула ошибку сервиса', { status, endpoint, method, attempts: attempt })
+          lastError = new TeslaApiError(kind, 'Tesla returned a service error', { status, endpoint, method, attempts: attempt })
           continue
         }
 
@@ -297,7 +298,7 @@ export class TeslaClient {
           errorKind: kind,
           errorMessage: aborted ? `timeout after ${timeoutMs}ms` : error instanceof Error ? error.message : 'network error',
           attempts: attempt,
-          requestHeaders: sanitizeHeaders({ Accept: 'application/json', 'User-Agent': 'DriveScope/1.0', Authorization: `Bearer ${accessToken}` }),
+          requestHeaders: sanitizeHeaders(headers),
           requestBody: sanitizeBody(options.body),
           responseHeaders: {},
           responseBody: null,
@@ -305,11 +306,11 @@ export class TeslaClient {
           sanitized: true,
         })
         if (!aborted && attempt < maxAttempts) {
-          lastError = new TeslaApiError(kind, 'Сетевая ошибка при обращении к Tesla', { endpoint, method, attempts: attempt })
+          lastError = new TeslaApiError(kind, 'Network error while calling Tesla', { endpoint, method, attempts: attempt })
           await sleepWithCap(retryDelayMs(attempt, this.deps.random))
           continue
         }
-        throw new TeslaApiError(kind, aborted ? `Таймаут запроса к Tesla (${timeoutMs} мс)` : 'Сеть недоступна при обращении к Tesla', {
+        throw new TeslaApiError(kind, aborted ? `Tesla request timed out (${timeoutMs} ms)` : 'Cannot reach Tesla over the network', {
           endpoint,
           method,
           attempts: attempt,
@@ -317,7 +318,7 @@ export class TeslaClient {
       }
     }
 
-    throw lastError ?? new TeslaApiError('unknown', 'Запрос к Tesla исчерпал попытки', { endpoint, method, attempts: maxAttempts })
+    throw lastError ?? new TeslaApiError('unknown', 'Tesla request exhausted all retry attempts', { endpoint, method, attempts: maxAttempts })
   }
 
   private failureFromStatus(
@@ -336,26 +337,31 @@ export class TeslaClient {
     if (kind === 'forbidden' && /fleet-api|fleetapi|developer\.tesla\.com/i.test(detail)) {
       return new TeslaApiError(
         'forbidden',
-        'Tesla закрыла доступ к Owner API для этого токена (403). Ответ ссылается на Fleet API — это ограничение платформы, а не ошибка запроса.',
+        'Tesla has closed Owner API access for this token (403). The response references the Fleet API — this is a platform limitation, not a request error.',
         { status, endpoint, method, attempts: attempt, responseBody: detail },
       )
     }
     if (kind === 'forbidden') {
-      return new TeslaApiError('forbidden', 'Tesla отклонила доступ (403)', { status, endpoint, method, attempts: attempt, responseBody: detail })
+      return new TeslaApiError('forbidden', 'Tesla denied access (403)', { status, endpoint, method, attempts: attempt, responseBody: detail })
     }
     if (kind === 'unauthorized') {
-      return new TeslaApiError('unauthorized', 'Токен доступа не принят (401)', { status, endpoint, method, attempts: attempt, responseBody: detail })
+      return new TeslaApiError('unauthorized', 'Access token not accepted (401)', { status, endpoint, method, attempts: attempt, responseBody: detail })
     }
     if (kind === 'not_found') {
-      return new TeslaApiError('not_found', `Ресурс не найден (404): ${endpoint}. Проверьте, что в пути стоит короткий id, а не vehicle_id`, { status, endpoint, method, attempts: attempt, responseBody: detail })
+      return new TeslaApiError('not_found', `Resource not found (404): ${endpoint}. Check that the path uses the short id, not vehicle_id`, { status, endpoint, method, attempts: attempt, responseBody: detail })
+    }
+    if (kind === 'vehicle_unavailable') {
+      // Tesla answers 408 rather than waking a sleeping car. Retrying it would be a
+      // wake attempt dressed as a read, so it is terminal and named (§21).
+      return new TeslaApiError('vehicle_unavailable', 'The vehicle did not answer the telemetry request (408) — it is asleep or unavailable', { status, endpoint, method, attempts: attempt, responseBody: detail })
     }
     if (kind === 'rate_limited') {
-      return new TeslaApiError('rate_limited', 'Лимит запросов Tesla (429)', { status, retryAfterMs, endpoint, method, attempts: attempt, responseBody: detail })
+      return new TeslaApiError('rate_limited', 'Tesla rate limit reached (429)', { status, retryAfterMs, endpoint, method, attempts: attempt, responseBody: detail })
     }
     if (kind === 'conflict') {
-      return new TeslaApiError('conflict', 'Автомобиль занят или команда отклонена (409)', { status, endpoint, method, attempts: attempt, responseBody: detail })
+      return new TeslaApiError('conflict', 'The vehicle is busy or the command was rejected (409)', { status, endpoint, method, attempts: attempt, responseBody: detail })
     }
-    return new TeslaApiError(kind, `Tesla вернула ${status}`, { status, endpoint, method, attempts: attempt, responseBody: detail })
+    return new TeslaApiError(kind, `Tesla returned ${status}`, { status, endpoint, method, attempts: attempt, responseBody: detail })
   }
 
   private unwrapEnvelope<T>(rawText: string, status: number, endpoint: string, method: string, attempt: number): T {
@@ -363,7 +369,7 @@ export class TeslaClient {
     try {
       payload = rawText ? JSON.parse(rawText) : null
     } catch {
-      throw new TeslaApiError('malformed', `Tesla вернула не-JSON ответ (${status})`, { status, endpoint, method, attempts: attempt })
+      throw new TeslaApiError('malformed', `Tesla returned a non-JSON response (${status})`, { status, endpoint, method, attempts: attempt })
     }
     if (payload && typeof payload === 'object') {
       const record = payload as Record<string, unknown>
@@ -371,7 +377,7 @@ export class TeslaClient {
         if (record.response === null || record.response === undefined) {
           // `{"response":null}` is how the Owner API answers a vehicle that is
           // reachable but has no data for this section — not a transport failure.
-          throw new TeslaApiError('not_found', 'Tesla вернула пустой ответ для этого раздела', { status, endpoint, method, attempts: attempt })
+          throw new TeslaApiError('not_found', 'Tesla returned an empty response for this section', { status, endpoint, method, attempts: attempt })
         }
         return record.response as T
       }
@@ -466,7 +472,7 @@ export class TeslaClient {
    */
   async getVehicleStatus(ownerApiId: string, options: RequestOptions = {}): Promise<{ status: VehicleStatus; raw: RawMergedVehicle; telemetryCollected: boolean }> {
     const entry = await this.getVehicle(ownerApiId, { requestType: 'vehicle_status', vehicleId: ownerApiId, ...options })
-    const asleep = entry.state !== 'online'
+    const asleep = !isVehicleAwake(entry.state)
     const data = asleep ? null : await this.getVehicleData(ownerApiId, { vehicleId: ownerApiId, ...options })
     const merged = mergeVehicleData(entry, data)
     return { status: normalizeVehicleStatus(merged), raw: merged, telemetryCollected: !asleep }
@@ -475,7 +481,7 @@ export class TeslaClient {
   /**
    * POST /api/1/vehicles/{id}/wake_up. Kept as an explicit method because the old
    * implementation announced POST and sent GET (plan E1). Not called by ordinary
-   * navigation — only behind the UI's confirmed «Запросить актуальный статус» action.
+   * navigation — only behind the UI's confirmed "Refresh" action.
    */
   async wakeVehicle(ownerApiId: string, options: RequestOptions = {}) {
     return this.request<RawVehicleListItem>(`/api/1/vehicles/${encodeURIComponent(ownerApiId)}/wake_up`, {

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const url = new URL(request.url)
   const only = url.searchParams.get('only')
   const rows = await readRequests({
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 /** DELETE /api/debug/logs — clears this owner's request history (§29). */
 export async function DELETE() {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const supabase = getSupabaseAdmin()
   const { data: owned } = await supabase.from('vehicles').select('id').eq('owner_id', user.id)
   const ids = (owned ?? []).map((row: { id: string }) => row.id)

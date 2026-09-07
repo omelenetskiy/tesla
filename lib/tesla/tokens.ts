@@ -1,7 +1,7 @@
 import { decryptSecret, encryptSecret } from '@/lib/crypto'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import { accessTokenExpiryIso, decodeTeslaToken, refreshTokens, verifyAccessToken, type TeslaTokenSet } from './auth'
-import { teslaConfig } from './config'
+import { authBaseForHost, teslaConfig } from './config'
 import { TeslaApiError, describeTeslaError } from './errors'
 
 /**
@@ -58,7 +58,7 @@ async function loadCredentialRow(vehicleId: string, ownerId?: string): Promise<C
   let query = supabase.from('vehicle_credentials').select(CREDENTIAL_COLUMNS).eq('vehicle_id', vehicleId)
   if (ownerId) query = query.eq('owner_id', ownerId)
   const { data, error } = await query.maybeSingle()
-  if (error) throw new TeslaApiError('unknown', `Чтение учётных данных Tesla не удалось: ${error.message}`)
+  if (error) throw new TeslaApiError('unknown', `Failed to read Tesla credentials: ${error.message}`)
   return (data as CredentialRow | null) ?? null
 }
 
@@ -101,7 +101,7 @@ export async function saveTokenSet(input: { vehicleId: string; ownerId: string; 
     payload.region = input.authHost === 'auth.tesla.cn' ? 'china' : 'global'
   }
   const { error } = await supabase.from('vehicle_credentials').upsert(payload, { onConflict: 'vehicle_id' })
-  if (error) throw new TeslaApiError('unknown', `Сохранение токенов Tesla не удалось: ${error.message}`)
+  if (error) throw new TeslaApiError('unknown', `Failed to save Tesla tokens: ${error.message}`)
   return { expiresAt, rotated: Boolean(input.tokenSet.refresh_token) }
 }
 
@@ -114,9 +114,9 @@ export async function refreshCredential(vehicleId: string, ownerId?: string): Pr
   if (existing) return existing
   const promise = (async () => {
     const row = await loadCredentialRow(vehicleId, ownerId)
-    if (!row) throw new TeslaApiError('invalid_grant', 'Учётная запись Tesla не подключена')
+    if (!row) throw new TeslaApiError('invalid_grant', 'Tesla account is not connected')
     if (!row.refresh_token_ciphertext) {
-      throw new TeslaApiError('invalid_grant', 'Refresh token отсутствует. Создайте новую пару токенов в Tesla Auth и подключите её на /connect.')
+      throw new TeslaApiError('invalid_grant', 'Refresh token is missing. Create a new token pair in Tesla Auth and connect it on /connect.')
     }
     const refreshToken = decryptSecret(row.refresh_token_ciphertext)
     const tokenSet = await refreshTokens(refreshToken, row.auth_host ?? null)
@@ -131,12 +131,12 @@ export async function refreshCredential(vehicleId: string, ownerId?: string): Pr
 export function createAccessTokenProvider(vehicleId: string, ownerId?: string) {
   return async () => {
     const row = await loadCredentialRow(vehicleId, ownerId)
-    if (!row) throw new TeslaApiError('invalid_grant', 'Учётная запись Tesla не подключена')
+    if (!row) throw new TeslaApiError('invalid_grant', 'Tesla account is not connected')
     const accessToken = decryptSecret(row.access_token_ciphertext)
     const expiresAt = row.access_token_expires_at ? Date.parse(row.access_token_expires_at) : 0
     if (!expiresAt || expiresAt > Date.now() + teslaConfig.expirySkewMs) return accessToken
     if (!row.refresh_token_ciphertext) {
-      throw new TeslaApiError('invalid_grant', 'Access token истёк, refresh token не сохранён. Подключите заново новую пару токенов.')
+      throw new TeslaApiError('invalid_grant', 'Access token expired and no refresh token is stored. Connect again with a new token pair.')
     }
     return refreshCredential(vehicleId, row.owner_id)
   }
@@ -185,13 +185,13 @@ export async function diagnoseAuth(vehicleId: string, ownerId?: string): Promise
       refreshTokenPresent: Boolean(row.refresh_token_ciphertext),
       expiresAt: row.access_token_expires_at,
       ...base,
-      detail: 'Сохранённый access token не является корректным JWT',
+      detail: 'Stored access token is not a valid JWT',
     }
   }
   const claims = { azp: decoded.azp, scopes: decoded.scp, authHost: row.auth_host ?? null }
   const expiryKnown = row.access_token_expires_at ? Date.parse(row.access_token_expires_at) : 0
   const notExpired = !expiryKnown || expiryKnown > Date.now()
-  const verified = await verifyAccessToken(accessToken, row.auth_host ? `https://${row.auth_host}${teslaConfig.authPath}` : undefined)
+  const verified = await verifyAccessToken(accessToken, authBaseForHost(row.auth_host ?? null))
   if (!verified.ok) {
     return {
       state: verified.status === 401 || verified.status === 403 ? 'AUTH_EXPIRED' : 'API_UNAVAILABLE',
@@ -201,7 +201,7 @@ export async function diagnoseAuth(vehicleId: string, ownerId?: string): Promise
       expiresAt: row.access_token_expires_at,
       ...claims,
       lastCheckedAt: base.lastCheckedAt,
-      detail: `userinfo вернул ${verified.status}`,
+      detail: `userinfo returned ${verified.status}`,
     }
   }
   return {
@@ -212,7 +212,7 @@ export async function diagnoseAuth(vehicleId: string, ownerId?: string): Promise
     expiresAt: row.access_token_expires_at,
     ...claims,
     lastCheckedAt: base.lastCheckedAt,
-    detail: notExpired ? null : 'Нужно обновление токена',
+    detail: notExpired ? null : 'Token refresh required',
   }
 }
 

@@ -17,7 +17,7 @@ type ItemState = 'pass' | 'fail' | 'unknown'
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   const url = new URL(request.url)
   const row = await resolveVehicle(user.id, url.searchParams.get('vehicle'))
   const supabase = getSupabaseAdmin()
@@ -33,11 +33,11 @@ export async function GET(request: Request) {
       connected: false,
       historyTables,
       items: [
-        { id: 'credentials', label: 'Пара токенов сохранена', state: 'fail' as ItemState, detail: 'Автомобиль не подключён — зайдите в «Подключение Tesla»' },
-        { id: 'access_token', label: 'Access token принят SSO', state: 'unknown' as ItemState, detail: 'Нет учётных данных' },
-        { id: 'refresh_token', label: 'Refresh token сохранён', state: 'unknown' as ItemState, detail: 'Нет учётных данных' },
-        { id: 'owner_api', label: 'Owner API отвечает', state: 'unknown' as ItemState, detail: 'Проверке нужен токен' },
-        { id: 'vehicle_list', label: 'Список автомобилей', state: 'fail' as ItemState, detail: 'В базе нет ни одного автомобиля' },
+        { id: 'credentials', label: 'Token pair stored', state: 'fail' as ItemState, detail: 'No vehicle connected — open "Tesla connection"' },
+        { id: 'access_token', label: 'Access token accepted by SSO', state: 'unknown' as ItemState, detail: 'No credentials' },
+        { id: 'refresh_token', label: 'Refresh token stored', state: 'unknown' as ItemState, detail: 'No credentials' },
+        { id: 'owner_api', label: 'Owner API responds', state: 'unknown' as ItemState, detail: 'The check needs a token' },
+        { id: 'vehicle_list', label: 'Vehicle list', state: 'fail' as ItemState, detail: 'No vehicle in the database' },
       ],
       recentFailures: [],
     })
@@ -52,49 +52,49 @@ export async function GET(request: Request) {
   const items: Array<{ id: string; label: string; state: ItemState; detail: string }> = [
     {
       id: 'credentials',
-      label: 'Пара токенов сохранена',
+      label: 'Token pair stored',
       state: auth.connected ? 'pass' : 'fail',
-      detail: auth.connected ? `Области: ${(auth.scopes ?? []).join(' ') || 'неизвестны'} · клиент: ${auth.azp ?? '—'}` : 'Подключите токены на /connect',
+      detail: auth.connected ? `Scopes: ${(auth.scopes ?? []).join(' ') || 'unknown'} · client: ${auth.azp ?? '—'}` : 'Connect the tokens on /connect',
     },
     {
       id: 'access_token',
-      label: 'Access token принят SSO',
+      label: 'Access token accepted by SSO',
       state: auth.state === 'AUTHORIZED' || auth.accessTokenValid ? 'pass' : auth.state === 'API_UNAVAILABLE' ? 'unknown' : 'fail',
-      detail: `${auth.state} · до ${auth.expiresAt ? new Date(auth.expiresAt).toLocaleString('ru-RU') : '—'}${auth.detail ? ` · ${auth.detail}` : ''}`,
+      detail: `${auth.state} · until ${auth.expiresAt ? new Date(auth.expiresAt).toLocaleString('en-US') : '—'}${auth.detail ? ` · ${auth.detail}` : ''}`,
     },
     {
       id: 'refresh_token',
-      label: 'Refresh token сохранён',
+      label: 'Refresh token stored',
       state: auth.refreshTokenPresent ? 'pass' : 'fail',
-      detail: auth.refreshTokenPresent ? 'Фактическую ротацию проверяет запрос «Обновить access token»' : 'Автообновление невозможно без него',
+      detail: auth.refreshTokenPresent ? 'The "Refresh access token" request checks actual rotation' : 'Auto-refresh is impossible without it',
     },
     {
       id: 'owner_api',
-      label: 'Owner API отвечает',
+      label: 'Owner API responds',
       state: probe.reachable ? 'pass' : probe.status === 403 ? 'fail' : 'fail',
       detail: probe.reachable
-        ? `HTTP ${probe.status} за ${probe.durationMs} мс`
-        : `HTTP ${probe.status ?? '—'} за ${probe.durationMs} мс · ${probe.error?.message ?? 'нет соединения'}`,
+        ? `HTTP ${probe.status} in ${probe.durationMs} ms`
+        : `HTTP ${probe.status ?? '—'} in ${probe.durationMs} ms · ${probe.error?.message ?? 'no connection'}`,
     },
     {
       id: 'vehicle_list',
-      label: 'Список автомобилей',
+      label: 'Vehicle list',
       state: probe.vehicleCount > 0 ? 'pass' : 'fail',
-      detail: `В аккаунте: ${probe.vehicleCount} · в базе: активный автомобиль ${row.owner_api_id ? `id ${row.owner_api_id}` : 'без короткого id'}`,
+      detail: `In account: ${probe.vehicleCount} · in database: active vehicle ${row.owner_api_id ? `id ${row.owner_api_id}` : 'with no short id'}`,
     },
     {
       id: 'short_id',
-      label: 'Короткий id сохранён',
+      label: 'Short id stored',
       state: row.owner_api_id ? 'pass' : 'fail',
       detail: row.owner_api_id
-        ? 'Путь /api/1/vehicles/{id} собирается из него'
-        : 'Сохранён только длинный vehicle_id — состояния будут 404. Обновите список автомобилей.',
+        ? 'The /api/1/vehicles/{id} path is built from it'
+        : 'Only the long vehicle_id is stored — the state requests will 404. Refresh the vehicle list.',
     },
     {
       id: 'snapshots',
-      label: 'Есть история снимков',
+      label: 'Snapshot history exists',
       state: (snapshotCount ?? 0) > 0 ? 'pass' : 'unknown',
-      detail: `vehicle_states: ${snapshotCount ?? 0} стр.`,
+      detail: `vehicle_states: ${snapshotCount ?? 0} rows.`,
     },
   ]
 
@@ -109,8 +109,8 @@ export async function GET(request: Request) {
       detail: status.error
         ? `${status.error.message}${status.error.status ? ` (${status.error.status})` : ''}`
         : status.status
-          ? `Разделы получены: ${['drive', 'charge', 'climate', 'state'].filter((key) => (status.status as Record<string, unknown>)[key]).join(', ')}`
-          : 'Ответ без данных',
+          ? `Sections received: ${['drive', 'charge', 'climate', 'state'].filter((key) => (status.status as Record<string, unknown>)[key]).join(', ')}`
+          : 'Response without data',
     })
   }
 

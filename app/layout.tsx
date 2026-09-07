@@ -2,20 +2,26 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 
-const inter = Inter({ subsets: ['latin'], display: 'swap' })
+/**
+ * Cyrillic subsets are kept because the previous build shipped them and a user may
+ * still have Russian content in history rows; the interface itself is English.
+ */
+const inter = Inter({ subsets: ['latin', 'cyrillic', 'cyrillic-ext'], display: 'swap' })
 
 export const metadata: Metadata = {
-    title: 'DRIVE / SCOPE',
-    description: 'Sleep-safe Tesla vehicle observability dashboard.',
+  title: 'DriveScope — Tesla',
+  description: 'Tesla companion for an owner: state, location, trips, battery and charging.',
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
     return (
-        <html lang="ru" suppressHydrationWarning>
+        <html lang="en" suppressHydrationWarning>
         <body className={inter.className}>
-        {/* Theme initialization script — runs before paint to avoid flash */}
+        {/* Theme initialisation runs before paint to avoid a flash of the wrong
+            scheme. 'system' resolves against prefers-color-scheme here exactly as
+            lib/hooks/use-theme.ts does afterwards, so client and HTML agree. */}
         <script dangerouslySetInnerHTML={{ __html: `
-(function(){try{var t=localStorage.getItem('theme');if(t){document.documentElement.setAttribute('data-theme',t)}else if(!window.matchMedia('(prefers-color-scheme:dark)').matches){document.documentElement.setAttribute('data-theme','light')}}catch(e){}})();` }} />
+(function(){try{var p=localStorage.getItem('theme')||'system';var dark=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',dark?'dark':'light')}catch(e){document.documentElement.setAttribute('data-theme','light')}})();` }} />
         {children}
         </body>
         </html>

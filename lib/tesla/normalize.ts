@@ -195,6 +195,7 @@ type RawVehicleState = {
   minutes_since_last_drive?: number
   last_drive_average_distance?: number
   est_12v_battery_voltage?: number
+  service_mode?: number | null
   battery?: number
   odometer_km?: number
   tire_pressure_last_reading_ts?: { fl: number; fr: number; rl: number; rr: number }
@@ -285,9 +286,27 @@ export type RawMergedVehicle = RawVehicleListItem & {
 
 // ── Section normalisers ─────────────────────────────────────────────────────
 
+/**
+ * Connectivity vocabulary.
+ *
+ * The Owner API has answered the vehicle `state` field with more than one word for the
+ * same thing: `online` on the vehicle endpoints, `active` on others. Comparing against
+ * the single literal `"online"` therefore classified a fully awake car as asleep, which
+ * suppressed the telemetry call forever — the symptom being a dashboard with no data
+ * while the credentials themselves were accepted.
+ */
+const AWAKE_STATES = new Set(['online', 'active'])
+const ASLEEP_STATES = new Set(['asleep'])
+
+/** True only for a state word that means "the radio is up, `vehicle_data` will answer". */
+export function isVehicleAwake(state: string | null | undefined): boolean {
+  return AWAKE_STATES.has(String(state ?? '').toLowerCase())
+}
+
 function normalizeConnectivity(state: string | null | undefined): Connectivity {
-  if (state === 'online') return 'online'
-  if (state === 'asleep') return 'asleep'
+  const value = String(state ?? '').toLowerCase()
+  if (AWAKE_STATES.has(value)) return 'online'
+  if (ASLEEP_STATES.has(value)) return 'asleep'
   return 'offline'
 }
 
@@ -345,7 +364,12 @@ export function normalizeDriveState(raw: Partial<RawDriveState> | undefined): Dr
 }
 
 export function normalizeChargeState(raw: Partial<RawChargeState> | undefined): ChargeState {
-  const minutes = num(raw?.minutes_to_full_charge) ?? (num(raw?.time_to_full_charge) ?? null)
+  // `minutes_to_full_charge` is minutes; `time_to_full_charge` is HOURS. The old
+  // code mixed the field classes once already (plan E11), so the conversion is
+  // explicit and pinned by a check rather than inferred from whichever is present.
+  const fromMinutes = num(raw?.minutes_to_full_charge)
+  const fromHours = num(raw?.time_to_full_charge)
+  const minutes = fromMinutes ?? (fromHours === null ? null : Math.round(fromHours * 60))
   const pilot = num(raw?.charger_pilot_current)
   return {
     stateOfCharge: num(raw?.battery_level),
@@ -370,6 +394,7 @@ export function normalizeChargeState(raw: Partial<RawChargeState> | undefined): 
     scheduledChargeStartTime: str(raw?.scheduled_charge_start_time),
     batteryHeaterOn: bool(raw?.battery_heater_on),
     batteryHeaterSupported: raw?.not_enough_power_to_heat === undefined ? null : !raw.not_enough_power_to_heat,
+    notEnoughPowerToHeat: bool(raw?.not_enough_power_to_heat),
     timestamp: num(raw?.timestamp),
   }
 }
@@ -413,6 +438,8 @@ export function normalizeVehicleState(raw: Partial<RawVehicleState> | undefined)
     wifiName: str(raw?.wifi_name),
     updateStatus: str(raw?.software_update?.status),
     updateVersion: str(raw?.software_update?.version),
+    serviceMode: num(raw?.service_mode),
+    lowVoltageBatteryVolts: rounded(num(raw?.est_12v_battery_voltage), 2),
     timestamp: num(raw?.timestamp),
   }
 }
@@ -441,7 +468,7 @@ export function normalizeVehicleConfig(raw: Partial<RawVehicleConfig> | undefine
  * VIN positions 4-5 encode the model. Verified against the community docs' vehicle
  * example rather than inferred: LRW=Model S, 5YJ=Model S, 70B/6B=Model 3,
  * LR3/X8F/5YJ3=Model 3, LRWYE8=Model X, 7SA=Cybertruck. Kept deliberately narrow:
- * an unknown VIN yields null, and the UI shows "модель не определена" instead of
+ * an unknown VIN yields null, and the UI shows "model not determined" instead of
  * guessing (requirement: never fabricate values).
  */
 const VIN_MODEL_PREFIXES: Array<[RegExp, string]> = [
@@ -486,7 +513,7 @@ export function buildIdentity(raw: RawMergedVehicle, overrideOwnerApiId?: string
   }
 }
 
-/** Counts populated numeric fields so the UI can say "3 из 8 показателей недоступны". */
+/** Counts populated numeric fields so the UI can say "3 of 8 values unavailable". */
 function completenessOf(status: Omit<VehicleStatus, 'completeness'>): number {
   const probes: Array<number | null | boolean | string | undefined> = [
     status.charge.stateOfCharge,
@@ -537,7 +564,7 @@ export function mergeVehicleData(entry: RawVehicleListItem, data: RawVehicleData
     charge_state: { ...entry.charge_state, ...envelope.charge_state },
     climate_state: { ...entry.climate_state, ...envelope.climate_state },
     vehicle_state: { ...entry.vehicle_state, ...envelope.vehicle_state },
-    vehicle_config: entry.vehicle_config ?? (data as { vehicle_config?: RawVehicleConfig }).vehicle_config,
+    vehicle_config: entry.vehicle_config ?? data?.response?.vehicle_config ?? data?.vehicle_config ?? null,
     last_updated: envelope.last_updated ?? data?.last_updated ?? entry.vehicle_state?.timestamp ?? null,
   } as RawMergedVehicle
 }

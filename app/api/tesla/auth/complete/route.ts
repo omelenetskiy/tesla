@@ -19,10 +19,10 @@ export const dynamic = 'force-dynamic'
  */
 async function complete(callbackUrl: string, userId: string) {
   const sessionCookie = (await cookies()).get('tesla_owner_oauth')
-  if (!sessionCookie) throw new TeslaApiError('invalid_grant', 'Сессия входа в Tesla истекла. Начните подключение заново.')
+  if (!sessionCookie) throw new TeslaApiError('invalid_grant', 'The Tesla sign-in session has expired. Start the connection again.')
 
   const saved = JSON.parse(decryptSecret(sessionCookie.value)) as { state?: string; codeVerifier?: string }
-  if (!saved.state || !saved.codeVerifier) throw new TeslaApiError('invalid_grant', 'Сохранённая сессия OAuth повреждена. Начните заново.')
+  if (!saved.state || !saved.codeVerifier) throw new TeslaApiError('invalid_grant', 'The stored OAuth session is corrupt. Start again.')
 
   const { code, issuer } = parseCallbackUrl(callbackUrl, saved.state)
   const tokenSet = await exchangeAuthorizationCode({ code, codeVerifier: saved.codeVerifier, issuer })
@@ -45,14 +45,14 @@ async function complete(callbackUrl: string, userId: string) {
       count: 0,
       status: 'unavailable',
       reason: error instanceof TeslaApiError && error.kind === 'forbidden'
-        ? 'Токен получен, но Owner API отклоняет запросы списка автомобилей (403). Учётные данные сохранены.'
-        : error instanceof Error ? error.message.slice(0, 200) : 'Список автомобилей не получен',
+        ? 'The token was obtained, but the Owner API rejects vehicle list requests (403). The credentials are stored.'
+        : error instanceof Error ? error.message.slice(0, 200) : 'The vehicle list was not fetched',
     }
   }
 
   const authHost = safeHost(tokenSet.access_token)
   const target = syncedRows[0] ?? null
-  if (!target) throw new TeslaApiError('not_found', 'Автомобиль не найден и не сохранён — подключите токены вручную на /connect')
+  if (!target) throw new TeslaApiError('not_found', 'No vehicle found or stored — connect the tokens manually on /connect')
 
   await saveTokenSet({ vehicleId: target.id, ownerId: userId, tokenSet, authHost })
   return { vehicleSync, credentialVehicleId: target.id, tokenSet }
@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     response.cookies.delete('tesla_owner_oauth')
     return response
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Завершение OAuth не удалось'
+    const message = error instanceof Error ? error.message : 'OAuth completion failed'
     return NextResponse.redirect(new URL(`/connect?error=${encodeURIComponent(message)}`, request.url))
   }
 }
@@ -86,15 +86,15 @@ export async function GET(request: Request) {
 /** Manual path: the void callback lands in the address bar, so the user pastes it. */
 export async function POST(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
   let body: { callbackUrl?: string }
   try {
     body = await request.json() as { callbackUrl?: string }
   } catch {
-    return NextResponse.json({ message: 'Некорректное тело запроса' }, { status: 400 })
+    return NextResponse.json({ message: 'Malformed request body' }, { status: 400 })
   }
   if (!body.callbackUrl?.trim()) {
-    return NextResponse.json({ message: 'Вставьте URL возврата целиком' }, { status: 400 })
+    return NextResponse.json({ message: 'Paste the full callback URL' }, { status: 400 })
   }
   try {
     const result = await complete(body.callbackUrl, user.id)
@@ -103,13 +103,13 @@ export async function POST(request: Request) {
       credentialVehicleId: result.credentialVehicleId,
       vehicles: result.vehicleSync,
       message: result.vehicleSync.status === 'ok'
-        ? `Tesla подключена. Найдено автомобилей: ${result.vehicleSync.count}.`
+        ? `Tesla connected. Vehicles found: ${result.vehicleSync.count}.`
         : result.vehicleSync.reason,
     })
     response.cookies.delete('tesla_owner_oauth')
     return response
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Завершение OAuth не удалось'
+    const message = error instanceof Error ? error.message : 'OAuth completion failed'
     return NextResponse.json({ message }, { status: error instanceof TeslaApiError && error.status ? 422 : 502 })
   }
 }

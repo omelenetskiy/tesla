@@ -56,7 +56,7 @@ alter table public.vehicle_states
 create index if not exists vehicle_states_vehicle_collected_idx
   on public.vehicle_states (vehicle_id, collected_at desc);
 
--- ── ActivityEvent (§13) — the Dashboard «Последние события» feed ───────────
+-- ── ActivityEvent (§13) — the Dashboard "Recent activity" feed ─────────────
 create table if not exists public.activity_events (
   id bigint generated always as identity primary key,
   vehicle_id uuid not null references public.vehicles(id) on delete cascade,

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/supabase-server'
-import { legacyVehicleFromStatus } from '@/lib/tesla/compat'
 import { listVehicleSummaries, readVehicleStatus, resolveVehicle } from '@/lib/tesla/service'
 
 export const dynamic = 'force-dynamic'
@@ -15,14 +14,14 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
 
   const url = new URL(request.url)
   const requestedVehicleId = url.searchParams.get('vehicle')
   const row = await resolveVehicle(user.id, requestedVehicleId)
   if (!row) {
     return NextResponse.json({
-      message: 'Автомобиль не подключён',
+      message: 'No vehicle connected',
       needsConnection: true,
       status: null,
       vehicle: null,
@@ -35,44 +34,35 @@ export async function GET(request: Request) {
   const snapshot = await readVehicleStatus({ row, force, mayWake })
   const vehicles = await listVehicleSummaries(user.id).catch(() => [])
 
-  const legacy = snapshot.status
-    ? legacyVehicleFromStatus(snapshot.status, row.display_name, snapshot.ageSeconds)
-    : null
-
   return NextResponse.json({
-    // New contract.
-    snapshot: { ...snapshot },
+    snapshot,
     vehicles,
     selectedVehicleId: row.id,
-    // Temporary projection for the pre-redesign dashboard (lib/tesla/compat.ts).
-    vehicle: legacy,
+    // Kept for the shell's header, which shows the configured identity.
     vehicleInfo: { id: row.provider_vehicle_id, name: row.display_name, model: row.model ?? 'Tesla' },
-    source: snapshot.source,
-    collection: snapshot.error ? 'failed' : snapshot.source === 'cache' ? 'skipped' : 'success',
-    reason: snapshot.collectionReason,
-    collectedAt: snapshot.status ? snapshot.collectedAt : null,
     wakeHint: snapshot.wakeHint,
     authState: snapshot.authState,
     message: snapshot.error?.message ?? cacheMessage(snapshot.collectionReason, snapshot.source),
   })
 }
 
-/** Russian copy for the cache/skip outcomes, kept out of the service layer (§D3). */
+/** User-facing copy for the cache/skip outcomes, kept out of the service layer (§D3). */
 function cacheMessage(reason: string | null, source: string): string | undefined {
   if (source === 'tesla_api') return undefined
   switch (reason) {
     case 'vehicle_sleeping':
-      return 'Автомобиль спит. Показаны последние сохранённые данные.'
+      return 'The vehicle is asleep. Showing the last stored data.'
+    case 'passive_mode_no_requests':
+      return 'Passive mode: the app reads the database and never contacts Tesla.'
     case 'wake_confirmation_required':
-      return 'Нужно подтверждение на «Запросить актуальный статус» — это может разбудить автомобиль.'
+      return 'The "Refresh" action needs your confirmation — it may wake the vehicle.'
     case 'fresh_cache':
     case 'within_live_interval':
+    case 'first_collect':
       return undefined
     case 'status_check_failed':
     case 'collection_failed':
-      return 'Не удалось обновить данные. Показаны последние сохранённые значения.'
-    case 'vehicle_sleeping_no_cache':
-      return 'Автомобиль спит. Сохранённых данных пока нет.'
+      return 'The update failed. Showing the last stored values.'
     default:
       return undefined
   }

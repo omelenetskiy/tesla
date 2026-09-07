@@ -56,6 +56,17 @@ export const teslaConfig = {
   authHost,
   authPath,
   authOrigin: `https://${authHost}`,
+  /**
+   * OAuth base = scheme + host + version path, e.g. `https://auth.tesla.com/oauth2/v3`.
+   *
+   * This is the only value that may be prefixed to `/authorize`, `/token` or
+   * `/userinfo`. `authOrigin` deliberately has no path, so the two used to be
+   * interchangeable in name while being different strings — and every caller that
+   * appended `authPath` to something that already contained it produced
+   * `/oauth2/v3/oauth2/v3/token`, which Tesla answers with a 404. That is why a
+   * freshly pasted token worked and everything died once it expired.
+   */
+  authBaseUrl: `https://${authHost}${authPath}`,
   authorizeUrl: `https://${authHost}${authPath}/authorize`,
   tokenUrl: `https://${authHost}${authPath}/token`,
   userinfoUrl: `https://${authHost}${authPath}/userinfo`,
@@ -89,17 +100,33 @@ export function regionForAuthHost(host: string): TeslaRegion {
 }
 
 /**
- * Maps an OAuth `issuer` claim to a token endpoint origin.
- * Tesla returns e.g. https://auth.tesla.com/oauth2/v3 — only the host is trusted.
+ * OAuth base (`scheme://host/oauth2/v3`) for a host stored on a credential row.
+ *
+ * Accepts a bare hostname or a full URL, and refuses anything that is not a Tesla
+ * auth host, so a database value can never redirect a bearer token elsewhere.
  */
-export function authOriginForIssuer(issuer: string | null | undefined): string {
-  if (!issuer) return teslaConfig.authOrigin
+export function authBaseForHost(host: string | null | undefined): string {
+  if (!host) return teslaConfig.authBaseUrl
+  const normalized = normalizeHost(host, '')
+  if (!normalized || !isTrustedAuthHost(normalized)) {
+    throw new Error(`Untrusted Tesla auth host: ${host}`)
+  }
+  return `https://${normalized}${authPath}`
+}
+
+/**
+ * OAuth base for the `issuer` parameter Tesla echoes back on the callback URL.
+ * Tesla returns e.g. `https://auth.tesla.com/oauth2/v3`; only the host is trusted,
+ * and the configured `TESLA_AUTH_PATH` is always re-applied rather than taken from
+ * the query string.
+ */
+export function authBaseForIssuer(issuer: string | null | undefined): string {
+  if (!issuer) return teslaConfig.authBaseUrl
   let host: string
   try {
     host = new URL(issuer).hostname
   } catch {
-    throw new Error('Tesla вернула некорректный issuer авторизации')
+    throw new Error('Tesla returned an invalid authorization issuer')
   }
-  if (!isTrustedAuthHost(host)) throw new Error(`Недоверенный Tesla issuer: ${host}`)
-  return `https://${host}${teslaConfig.authPath}`
+  return authBaseForHost(host)
 }

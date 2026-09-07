@@ -95,6 +95,8 @@ export type ChargeState = {
   scheduledChargeStartTime: string | null
   batteryHeaterOn: boolean | null
   batteryHeaterSupported: boolean | null
+  /** Tesla reports this when the pack cannot spare energy for cabin heating. */
+  notEnoughPowerToHeat: boolean | null
   timestamp: number | null
 }
 
@@ -132,6 +134,10 @@ export type VehicleState = {
   wifiName: string | null
   updateStatus: string | null
   updateVersion: string | null
+  /** Tesla's `service_mode`: 0 none, 1 scheduled, 2 roadside, 3 repair. */
+  serviceMode: number | null
+  /** 12 V auxiliary battery, when reported. A sag here is a real-world fault. */
+  lowVoltageBatteryVolts: number | null
   timestamp: number | null
 }
 
@@ -238,7 +244,7 @@ export type ChargingSession = {
   confidence: 'gps_route' | 'snapshot_gap'
 }
 
-/** §13 ActivityEvent — the single feed behind Dashboard → «Последние события». */
+/** §13 ActivityEvent — the single feed behind Dashboard → "Recent activity". */
 export type ActivityEvent = {
   id: string
   vehicleId: string

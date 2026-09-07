@@ -21,7 +21,11 @@ export async function proxy(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-  const isPublic = request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/auth') || request.nextUrl.pathname.startsWith('/_next')
+  const path = request.nextUrl.pathname
+  // /api/collect is called by a scheduler with a bearer secret, never by a browser
+  // session — redirecting it to /login made background collection unreachable, and
+  // the collector's own credential check is what guards it. Exact match only.
+  const isPublic = path === '/api/collect' || path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/_next')
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url))
   }

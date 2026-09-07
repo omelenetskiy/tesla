@@ -17,6 +17,7 @@ export type TeslaErrorKind =
   | 'timeout'           // AbortController deadline
   | 'malformed'         // non-JSON or unexpected envelope
   | 'invalid_grant'     // token endpoint rejected the refresh token
+  | 'vehicle_unavailable' // 408 — the vehicle did not answer (asleep or offline)
   | 'challenge'         // Tesla WAF/hcaptcha on the auth host
   | 'unknown'
 
@@ -80,6 +81,7 @@ export function classifyStatus(status: number, retryAfterHeader?: string | null)
   if (status === 401) return 'unauthorized'
   if (status === 403) return 'forbidden'
   if (status === 404) return 'not_found'
+  if (status === 408) return 'vehicle_unavailable'
   if (status === 409) return 'conflict'
   if (status === 429) return 'rate_limited'
   if (status >= 500) return 'server'
@@ -96,25 +98,26 @@ export function parseRetryAfter(value: string | null | undefined): number | unde
   return Math.max(0, date - Date.now())
 }
 
-const RU_LABEL: Record<TeslaErrorKind, string> = {
-  unauthorized: 'Срок действия токена Tesla истёк',
-  forbidden: 'Tesla отклонила доступ к Owner API (403)',
-  not_found: 'Запрошенный ресурс не найден (404)',
-  conflict: 'Конфликт состояния — автомобиль занят (409)',
-  rate_limited: 'Превышен лимит запросов Tesla (429)',
-  server: 'Сервер Tesla вернул ошибку',
-  network: 'Сеть недоступна при обращении к Tesla',
-  timeout: 'Превышено время ожидания Tesla',
-  malformed: 'Tesla вернула некорректный ответ',
-  invalid_grant: 'Refresh token отклонён или истёк',
-  challenge: 'Tesla запросила проверку в браузере (WAF)',
-  unknown: 'Запрос к Tesla завершился с ошибкой',
+const ERROR_LABEL: Record<TeslaErrorKind, string> = {
+  unauthorized: 'The Tesla token has expired',
+  forbidden: 'Tesla refused access to the Owner API (403)',
+  not_found: 'The requested resource was not found (404)',
+  conflict: 'State conflict — the vehicle is busy (409)',
+  rate_limited: 'Tesla request rate limit exceeded (429)',
+  server: 'The Tesla server returned an error',
+  network: 'Network unavailable while contacting Tesla',
+  timeout: 'Timed out waiting for Tesla',
+  malformed: 'Tesla returned a malformed response',
+  invalid_grant: 'Refresh token rejected or expired',
+  vehicle_unavailable: 'The vehicle did not answer (408) — likely asleep',
+  challenge: 'Tesla asked for a browser check (WAF)',
+  unknown: 'The request to Tesla failed',
 }
 
 export function describeTeslaError(error: unknown): string {
-  if (error instanceof TeslaApiError) return RU_LABEL[error.kind]
+  if (error instanceof TeslaApiError) return ERROR_LABEL[error.kind]
   if (error instanceof Error && error.message) return error.message
-  return RU_LABEL.unknown
+  return ERROR_LABEL.unknown
 }
 
 /** Safe for client consumption: no token material, no raw provider payload. */

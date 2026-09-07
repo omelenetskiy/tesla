@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/supabase-server'
-import { legacyHistoryFromBundle } from '@/lib/tesla/compat'
 import { readHistory, type HistoryRange } from '@/lib/tesla/history'
 import { resolveVehicle } from '@/lib/tesla/service'
 
@@ -17,7 +16,7 @@ const RANGES = ['24h', '7d', '30d', '90d', 'all'] as const
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
+  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
 
   const url = new URL(request.url)
   const requested = url.searchParams.get('range') as HistoryRange | null
@@ -25,23 +24,16 @@ export async function GET(request: Request) {
 
   const row = await resolveVehicle(user.id, url.searchParams.get('vehicle'))
   if (!row) {
-    return NextResponse.json({ battery: [], trips: [], charging: [], stats: null, origin: 'empty', historyTablesMissing: true, range, snapshotCount: 0 })
+    return NextResponse.json({ range, origin: 'empty', historyTablesMissing: true, snapshotCount: 0, history: { battery: [], trips: [], charging: [] } })
   }
 
   const bundle = await readHistory(row.id, range)
-  const legacy = legacyHistoryFromBundle(bundle)
 
   return NextResponse.json({
     range,
     origin: bundle.origin,
     historyTablesMissing: bundle.historyTablesMissing,
     snapshotCount: bundle.snapshotCount,
-    // New contract: domain models under `history`.
     history: { battery: bundle.battery, trips: bundle.trips, charging: bundle.charging },
-    // Temporary projection for the pre-redesign dashboard (lib/tesla/compat.ts).
-    battery: legacy.battery,
-    trips: legacy.trips,
-    charging: legacy.charging,
-    stats: legacy.stats,
   })
 }

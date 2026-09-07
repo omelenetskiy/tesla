@@ -17,12 +17,19 @@ function clamp(value: string | null): string | null {
 
 export type RequestLogRow = ApiRequestLog
 
-/** Best-effort: a telemetry read must never fail because its audit row did. */
-export async function recordRequest(input: TeslaRequestLogInput): Promise<void> {
+/**
+ * Best-effort: a telemetry read must never fail because its audit row did.
+ *
+ * `ownerId` is written alongside the vehicle because the RLS select policy grants a
+ * user visibility through either column; rows with both null are invisible to the
+ * very person whose request they recorded.
+ */
+export async function recordRequest(input: TeslaRequestLogInput, ownerId?: string | null): Promise<void> {
   try {
     const supabase = getSupabaseAdmin()
     const { error } = await supabase.from('api_request_logs').insert({
       vehicle_id: input.vehicleId,
+      owner_id: ownerId ?? null,
       request_type: input.requestType,
       method: input.method,
       endpoint: input.endpoint.slice(0, 400),
@@ -61,6 +68,10 @@ export async function readRequests(filter: RequestLogFilter = {}): Promise<Reque
     .from('api_request_logs')
     .select('*')
     .order('created_at', { ascending: false })
+    // Retries of one run land in the same millisecond, and without a tiebreak the
+    // database is free to return them in a different order on every read — which the
+    // console renders as rows jumping around under the cursor.
+    .order('id', { ascending: false })
     .limit(Math.min(200, Math.max(1, filter.limit ?? 50)))
   if (filter.vehicleId) query = query.eq('vehicle_id', filter.vehicleId)
   if (filter.requestType) query = query.eq('request_type', filter.requestType)

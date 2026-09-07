@@ -1,9 +1,11 @@
 import { TeslaClient, type TeslaRequestLogInput } from './client'
 import { CATALOG_BY_ID, environmentFor, type CatalogEntry } from './catalog'
-import { teslaConfig } from './config'
+import { authBaseForHost } from './config'
 import { TeslaApiError, describeTeslaError, toPublicError } from './errors'
+import { resolveOwnerApiId } from './identity'
 import { verifyAccessToken } from './auth'
-import type { VehicleRow } from './service'
+import { syncVehiclesFromList, type VehicleRow } from './service'
+import type { RawVehicleListItem } from './normalize'
 import { recordRequest } from './request-log'
 import { redactText, sanitizeHeaders, sanitizeUrl } from './sanitize'
 import { refreshCredential, readCredential } from './tokens'
@@ -57,7 +59,7 @@ function applyPathParams(path: string, params: Record<string, string>, entry: Ca
     if (!resolved.includes(token)) continue
     const value = params[param.name]?.trim()
     if (!value) {
-      if (param.required) throw new TeslaApiError('not_found', `Не заполнен обязательный параметр пути {${param.name}}`, { endpoint: path, method: entry.method })
+      if (param.required) throw new TeslaApiError('not_found', `Required path parameter {${param.name}} is not filled in`, { endpoint: path, method: entry.method })
       continue
     }
     resolved = resolved.replace(token, encodeURIComponent(value))
@@ -79,11 +81,11 @@ export function buildCurl(input: { method: string; url: string; headers: Record<
 }
 
 function ownerApiIdOrThrow(row: VehicleRow) {
-  const candidate = row.owner_api_id ?? (row.provider_vehicle_id && row.provider_vehicle_id.length <= 12 ? row.provider_vehicle_id : null)
+  const candidate = resolveOwnerApiId(row)
   if (!candidate) {
     throw new TeslaApiError(
       'not_found',
-      'Для этого автомобиля нет короткого Owner API id. Обновите список автомобилей (GET /api/1/vehicles) — id появляется там.',
+      'This vehicle has no short Owner API id. Refresh the vehicle list (GET /api/1/vehicles) — the id appears there.',
       { endpoint: '/api/1/vehicles/:id', method: 'GET' },
     )
   }
@@ -92,16 +94,21 @@ function ownerApiIdOrThrow(row: VehicleRow) {
 
 export async function executeDebugRequest(input: DebugRequestInput): Promise<DebugRequestResult> {
   const entry = CATALOG_BY_ID.get(input.entryId)
-  if (!entry) throw new TeslaApiError('not_found', `Неизвестный запрос каталога: ${input.entryId}`)
+  if (!entry) throw new TeslaApiError('not_found', `Unknown catalog request: ${input.entryId}`)
   if (!entry.implemented && entry.executor === 'not_implemented') {
-    throw new TeslaApiError('not_found', 'Этот эндпоинт не реализован в приложении и не может быть выполнен отсюда', { endpoint: entry.path, method: entry.method })
+    throw new TeslaApiError('not_found', 'This endpoint is not implemented in the app and cannot be run from here', { endpoint: entry.path, method: entry.method })
   }
   if (entry.safety !== 'read' && !input.confirmUnsafe) {
-    throw new TeslaApiError('conflict', 'Запрос меняет состояние (пробуждение или учётные данные) — нужно явное подтверждение', { endpoint: entry.path, method: entry.method })
+    throw new TeslaApiError('conflict', 'The request changes state (wake or credentials) — explicit confirmation is required', { endpoint: entry.path, method: entry.method })
   }
 
   const environment = environmentFor(input.environmentId)
   const captured: TeslaRequestLogInput[] = []
+  // Every attempt is written by `onLog`; keeping the promises lets the response wait
+  // for its own audit rows. Without it the console refetched its history before the
+  // insert had landed, so the run that just finished was missing from the list until
+  // the operator pressed Refresh.
+  const writes: Promise<void>[] = []
   const startedAt = Date.now()
   const timestamp = new Date().toISOString()
   const diagnostics: string[] = []
@@ -114,7 +121,7 @@ export async function executeDebugRequest(input: DebugRequestInput): Promise<Deb
     apiBaseUrlOverride: environment.apiBaseUrl,
     onLog: (logEntry) => {
       captured.push(logEntry)
-      void recordRequest({ ...logEntry, vehicleId: logEntry.vehicleId ?? input.vehicleRow.id })
+      writes.push(recordRequest({ ...logEntry, vehicleId: logEntry.vehicleId ?? input.vehicleRow.id }, input.vehicleRow.owner_id))
     },
   })
 
@@ -124,10 +131,10 @@ export async function executeDebugRequest(input: DebugRequestInput): Promise<Deb
   let payload: unknown = null
   let failure: unknown = null
   try {
-    if (isStreaming) throw new TeslaApiError('not_found', 'WebSocket-запросы из консоли не выполняются', { endpoint: path, method: entry.method })
+    if (isStreaming) throw new TeslaApiError('not_found', 'WebSocket requests cannot be run from the console', { endpoint: path, method: entry.method })
     if (entry.executor === 'auth_probe') {
       payload = await runAuthProbe(entry.id, input.vehicleRow, environment.authHost)
-      diagnostics.push('Ответ получен от SSO-хоста, а не от Owner API.')
+      diagnostics.push('The answer came from the SSO host, not from the Owner API.')
     } else if (entry.executor === 'owner_api_raw') {
       payload = await client.request(path, { method: 'GET', query: input.query, vehicleId: input.vehicleRow.id, requestType: 'probe', noCache: true })
     } else {
@@ -136,6 +143,23 @@ export async function executeDebugRequest(input: DebugRequestInput): Promise<Deb
   } catch (error) {
     failure = error
   }
+
+  // A successful vehicle list is the only response that carries the short id, so the
+  // console persists it: the next request is prefilled instead of making the operator
+  // copy a number out of a JSON tree.
+  if (!failure && entry.id === 'vehicles-list' && Array.isArray(payload)) {
+    try {
+      const synced = await syncVehiclesFromList(input.vehicleRow.owner_id, payload as RawVehicleListItem[])
+      const stored = synced.vehicles.filter((row) => resolveOwnerApiId(row)).length
+      diagnostics.push(`Synced ${synced.count} vehicle(s) from the account; ${stored} now have a short id stored and prefilled.`)
+    } catch {
+      diagnostics.push('The vehicle list answered, but its identifiers could not be stored — check migration 004 is applied.')
+    }
+  }
+
+  // The console refetches its history the moment this response lands, so the audit
+  // rows have to be durable before it is returned.
+  await Promise.all(writes)
 
   const last = captured.at(-1)
   const errorInfo = failure ? toPublicError(failure, path) : null
@@ -165,7 +189,7 @@ export async function executeDebugRequest(input: DebugRequestInput): Promise<Deb
 
 async function accessTokenFor(row: VehicleRow): Promise<string> {
   const credential = await readCredential(row.id, row.owner_id)
-  if (!credential) throw new TeslaApiError('invalid_grant', 'Учётная запись Tesla не подключена')
+  if (!credential) throw new TeslaApiError('invalid_grant', 'No Tesla account is connected')
   return credential.accessToken
 }
 
@@ -177,16 +201,19 @@ function redactSafeJson(value: unknown): string {
 
 async function runTeslaClientCall(client: TeslaClient, entry: CatalogEntry, input: DebugRequestInput, path: string) {
   const options = { query: input.query, vehicleId: input.vehicleRow.id, noCache: true }
-  const id = ownerApiIdOrThrow(input.vehicleRow)
+  // Resolved lazily. `GET /api/1/vehicles` needs no id at all, and resolving it
+  // eagerly made the first request of the login sequence fail with "this vehicle has
+  // no short Owner API id" — the very request that is supposed to produce one.
+  const storedId = () => ownerApiIdOrThrow(input.vehicleRow)
   switch (entry.id) {
     case 'vehicles-list':
       return client.getVehicles(options)
     case 'vehicles-get':
-      return client.getVehicle(pathId(path) ?? id, options)
+      return client.getVehicle(pathId(path) ?? storedId(), options)
     case 'vehicle-data':
-      return client.getVehicleData(pathId(path) ?? id, options)
+      return client.getVehicleData(pathId(path) ?? storedId(), options)
     case 'wake-up':
-      return client.wakeVehicle(pathId(path) ?? id)
+      return client.wakeVehicle(pathId(path) ?? storedId())
     case 'legacy-data':
     case 'latest-vehicle-data':
     case 'data-request-drive-state':
@@ -195,7 +222,7 @@ async function runTeslaClientCall(client: TeslaClient, entry: CatalogEntry, inpu
     case 'nearby-charging-sites':
       return client.request(path, { ...options, requestType: 'probe' })
     default:
-      throw new TeslaApiError('not_found', `Запрос ${entry.id} не подключён к исполнению`, { endpoint: entry.path, method: entry.method })
+      throw new TeslaApiError('not_found', `Request ${entry.id} is not wired to an executor`, { endpoint: entry.path, method: entry.method })
   }
 }
 
@@ -212,8 +239,8 @@ function pathId(path: string) {
 async function runAuthProbe(entryId: string, row: VehicleRow, authHost: string) {
   if (entryId === 'auth-userinfo') {
     const credential = await readCredential(row.id, row.owner_id)
-    if (!credential) throw new TeslaApiError('invalid_grant', 'Учётная запись Tesla не подключена')
-    const result = await verifyAccessToken(credential.accessToken, `https://${authHost}${teslaConfig.authPath}`)
+    if (!credential) throw new TeslaApiError('invalid_grant', 'No Tesla account is connected')
+    const result = await verifyAccessToken(credential.accessToken, authBaseForHost(authHost))
     return {
       ok: result.ok,
       http_status: result.status,
@@ -227,7 +254,7 @@ async function runAuthProbe(entryId: string, row: VehicleRow, authHost: string) 
   if (entryId === 'auth-refresh') {
     const before = await readCredential(row.id, row.owner_id)
     if (!before?.refreshToken) {
-      throw new TeslaApiError('invalid_grant', 'Refresh token не сохранён — переподключите пару токенов на /connect', { endpoint: '/oauth2/v3/token', method: 'POST' })
+      throw new TeslaApiError('invalid_grant', 'Refresh token is not stored — reconnect the token pair on /connect', { endpoint: '/oauth2/v3/token', method: 'POST' })
     }
     const access = await refreshCredential(row.id, row.owner_id)
     const after = await readCredential(row.id, row.owner_id)
@@ -240,7 +267,7 @@ async function runAuthProbe(entryId: string, row: VehicleRow, authHost: string) 
       auth_host: after?.authHost ?? null,
     }
   }
-  throw new TeslaApiError('not_found', 'Неизвестная проверка аутентификации')
+  throw new TeslaApiError('not_found', 'Unknown authentication check')
 }
 
 export function describeFailure(error: unknown) {

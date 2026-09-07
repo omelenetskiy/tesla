@@ -1,9 +1,15 @@
 'use client'
 
-import { FormEvent, useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { AlertTriangle } from 'lucide-react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 
+/**
+ * Application account (not Tesla). This is a local Supabase identity that owns the
+ * vehicle rows and the encrypted tokens — signing in here does not touch Tesla, and
+ * it is not where a Tesla password would go.
+ */
 export default function LoginPage() {
   const router = useRouter()
   const supabase = createSupabaseBrowserClient()
@@ -18,20 +24,18 @@ export default function LoginPage() {
     setLoading(true)
     setError('')
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      setError('Supabase не настроен. Добавьте URL проекта и публичный ключ в переменные окружения.')
+      setError('Supabase is not configured. Add the project URL and publishable key to the environment.')
       setLoading(false)
       return
     }
-    const result = mode === 'login'
-      ? await supabase.auth.signInWithPassword({ email, password })
-      : await supabase.auth.signUp({ email, password })
+    const result = mode === 'login' ? await supabase.auth.signInWithPassword({ email, password }) : await supabase.auth.signUp({ email, password })
     if (result.error) {
       setError(result.error.message)
       setLoading(false)
       return
     }
     if (mode === 'signup' && !result.data.session) {
-      setError('Аккаунт создан. Подтвердите email, затем войдите.')
+      setError('Account created. Confirm your email, then sign in.')
       setLoading(false)
       return
     }
@@ -39,5 +43,50 @@ export default function LoginPage() {
     router.refresh()
   }
 
-  return <main className="auth-shell"><section className="auth-panel"><p className="eyebrow">DRIVE / SCOPE</p><h1>{mode === 'login' ? 'Войти в данные автомобиля' : 'Создать личное пространство'}</h1><p className="auth-copy">Данные Tesla хранятся зашифрованными на сервере. Обычный просмотр использует сохранённые snapshots и не обращается к автомобилю.</p><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label><label>Пароль<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required /></label>{error && <p className="form-error" role="alert">{error}</p>}<button className="request-status auth-submit" disabled={loading}>{loading ? 'Подождите...' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}</button></form><button className="text-link auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError('') }}>{mode === 'login' ? 'Создать аккаунт' : 'У меня уже есть аккаунт'}</button></section></main>
+  const field = 'h-10 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-ink-tertiary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25'
+
+  return (
+    <main className="flex min-h-dvh items-center justify-center bg-canvas p-4">
+      <section className="w-full max-w-[380px] rounded-2xl border border-line bg-surface p-6 shadow-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary">DriveScope</p>
+        <h1 className="mt-1 text-[19px] font-semibold tracking-[-0.01em] text-ink">{mode === 'login' ? 'Sign in' : 'Create your account'}</h1>
+        <p className="mt-1.5 text-[13px] leading-5 text-ink-secondary">
+          This is the app&apos;s own account. Your Tesla credentials stay on the server, encrypted, and are handled on the next screen.
+        </p>
+
+        <form onSubmit={submit} className="mt-5 space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-ink-secondary">Email</span>
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required className={field} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[12px] font-medium text-ink-secondary">Password</span>
+            <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required className={field} />
+          </label>
+
+          {error && (
+            <p role="alert" className="flex items-start gap-2 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-[12.5px] leading-4 text-danger">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              <span className="min-w-0">{error}</span>
+            </p>
+          )}
+
+          <button type="submit" disabled={loading} className="h-10 w-full rounded-lg border border-accent bg-accent px-4 text-[14px] font-medium text-ink-inverse shadow-xs transition-[filter] hover:brightness-95 disabled:opacity-60">
+            {loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          onClick={() => {
+            setMode(mode === 'login' ? 'signup' : 'login')
+            setError('')
+          }}
+          className="mt-3 h-9 w-full rounded-lg text-[13px] text-ink-secondary hover:text-ink"
+        >
+          {mode === 'login' ? 'Create an account instead' : 'I already have an account'}
+        </button>
+      </section>
+    </main>
+  )
 }
