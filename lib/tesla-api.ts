@@ -98,5 +98,3 @@ export async function getTeslaVehicle(accessToken: string, vehicleId: string, in
   const detail = includeDetails ? await teslaFetch<TeslaVehicle>(`/api/1/vehicles/${source.id}/vehicle_data`, accessToken) : {}
   return normalizeVehicle({ ...source, ...detail })
 }
-
-

@@ -54,5 +54,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ source: 'cache', collection: 'failed', reason: message, vehicle: cached?.state, collectedAt: cached?.collected_at }, { status: 502 })
   }
 }
-
-
