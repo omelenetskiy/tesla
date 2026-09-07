@@ -100,7 +100,7 @@ export function parseRetryAfter(value: string | null | undefined): number | unde
 
 const ERROR_LABEL: Record<TeslaErrorKind, string> = {
   unauthorized: 'The Tesla token has expired',
-  forbidden: 'Tesla refused access to the Owner API (403)',
+  forbidden: 'Tesla refused the request (403)',
   not_found: 'The requested resource was not found (404)',
   conflict: 'State conflict — the vehicle is busy (409)',
   rate_limited: 'Tesla request rate limit exceeded (429)',
@@ -115,7 +115,16 @@ const ERROR_LABEL: Record<TeslaErrorKind, string> = {
 }
 
 export function describeTeslaError(error: unknown): string {
-  if (error instanceof TeslaApiError) return ERROR_LABEL[error.kind]
+  if (error instanceof TeslaApiError) {
+    const label = ERROR_LABEL[error.kind]
+    // The bare label made every 404 read the same. "No usable vehicle identifier is stored
+    // yet" and a real HTTP 404 from Tesla's gateway both rendered as "The requested resource
+    // was not found (404)", so the operator could not tell whether to fix the app's data or
+    // the request — and neither could anyone reading a paste of it.
+    const where = error.endpoint ? ` · ${error.method} ${error.endpoint}` : ''
+    const detail = error.message && error.message !== label ? `: ${error.message}` : error.responseBody ? `: ${error.responseBody.slice(0, 140)}` : ''
+    return `${label}${where}${detail}`.slice(0, 300)
+  }
   if (error instanceof Error && error.message) return error.message
   return ERROR_LABEL.unknown
 }

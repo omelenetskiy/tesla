@@ -25,15 +25,15 @@ export async function proxy(request: NextRequest) {
   // /api/collect is called by a scheduler with a bearer secret, never by a browser
   // session — redirecting it to /login made background collection unreachable, and
   // the collector's own credential check is what guards it. Exact match only.
-  const isPublic = path === '/api/collect' || path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/_next')
+  // /api/fleet/callback is exempt for a different reason: the one-time code Tesla just
+  // issued would be consumed by a redirect to /login and lost. The route checks the
+  // session itself and reports the reason instead.
+  const isPublic = path === '/api/collect' || path === '/api/fleet/callback' || path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/_next')
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
   if (user && request.nextUrl.pathname === '/login') {
     return NextResponse.redirect(new URL('/', request.url))
-  }
-  if (request.nextUrl.pathname === '/api/tesla/auth/callback') {
-    return NextResponse.rewrite(new URL(`/api/tesla/auth/complete${request.nextUrl.search}`, request.url))
   }
   return response
 }

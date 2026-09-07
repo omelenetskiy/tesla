@@ -27,7 +27,7 @@ export type RequestLogRow = ApiRequestLog
 export async function recordRequest(input: TeslaRequestLogInput, ownerId?: string | null): Promise<void> {
   try {
     const supabase = getSupabaseAdmin()
-    const { error } = await supabase.from('api_request_logs').insert({
+    const row = {
       vehicle_id: input.vehicleId,
       owner_id: ownerId ?? null,
       request_type: input.requestType,
@@ -47,8 +47,20 @@ export async function recordRequest(input: TeslaRequestLogInput, ownerId?: strin
       response_bytes: input.responseByteLength,
       sanitized: true,
       created_at: input.at ?? new Date().toISOString(),
-    })
-    if (error) console.error('[tesla] request log write failed', error.message)
+    }
+    const { error } = await supabase.from('api_request_logs').insert(row)
+    if (error) {
+      // A CHECK-constraint failure means the deployment is behind on migrations, not that the
+      // request was bad. Retrying under an always-allowed type keeps the audit trail whole;
+      // dropping the row silently is how a command becomes invisible in the console history
+      // while still having happened to the car.
+      if (/check constraint|request_type/i.test(error.message)) {
+        const { error: fallbackError } = await supabase.from('api_request_logs').insert({ ...row, request_type: 'probe' })
+        if (fallbackError) console.error('[tesla] request log write failed', fallbackError.message)
+        return
+      }
+      console.error('[tesla] request log write failed', error.message)
+    }
   } catch (error) {
     console.error('[tesla] request log unavailable', error instanceof Error ? error.message : error)
   }

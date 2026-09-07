@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       id: 'credentials',
       label: 'Token pair stored',
       state: auth.connected ? 'pass' : 'fail',
-      detail: auth.connected ? `Scopes: ${(auth.scopes ?? []).join(' ') || 'unknown'} · client: ${auth.azp ?? '—'}` : 'Connect the tokens on /connect',
+      detail: auth.connected ? `Scopes: ${(auth.scopes ?? []).join(' ') || 'unknown'} · client: ${auth.azp ?? '—'}` : 'Authorize under Settings → Tesla account',
     },
     {
       id: 'access_token',

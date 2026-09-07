@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server'
 import { getAuthenticatedUser } from '@/lib/supabase-server'
-import { listVehicleSummaries, readVehicleStatus, resolveVehicle } from '@/lib/tesla/service'
+import { listVehicleSummaries, listVehicleRows, readVehicleStatus, resolveVehicle } from '@/lib/tesla/service'
+import { buildFleetClient, fleetReadMessage, fleetVehicleTag, pickFleetRow, readFleetStatus, syncFleetVehicles } from '@/lib/fleet/service'
+import { readFleetCredential } from '@/lib/fleet/tokens'
+import { describeTeslaError } from '@/lib/tesla/errors'
 
 export const dynamic = 'force-dynamic'
 
 /**
  * GET /api/vehicle — the dashboard's single read.
  *
- * Accepts `?vehicle=<uuid>` for the selector and `?fresh=true&allowWake=true` for
- * the explicit, confirmed current-status action. Everything else is decided by the
- * state-aware polling policy, so ordinary navigation costs zero Tesla requests once
- * a fresh snapshot exists (§21, §48).
+ * Fleet first: when the account holds a Fleet token, this route *is* the startup data path,
+ * and it creates the vehicle row on the way through. The Owner API branch below stays only
+ * until P6 removes it, so a deployment that has not re-authorized yet still shows something.
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
@@ -18,6 +20,56 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url)
   const requestedVehicleId = url.searchParams.get('vehicle')
+
+  const credential = await readFleetCredential(user.id).catch(() => null)
+  if (credential) {
+    // Not resolveVehicle: that returns the oldest row, which on a previously-Owner-API
+    // account is the legacy one with no addressable identifier.
+    let row = pickFleetRow(await listVehicleRows(user.id), requestedVehicleId)
+    if (!row || !fleetVehicleTag(row)) {
+      // The vehicle list is the only thing that can produce a usable row, and it needs no
+      // id itself — so the first read after authorizing repairs the state instead of
+      // reporting "no vehicle connected" forever.
+      const bootstrap = buildFleetClient(user.id)
+      try {
+        await syncFleetVehicles(user.id, bootstrap)
+      } catch (error) {
+        const vehicles = await listVehicleSummaries(user.id).catch(() => [])
+        return NextResponse.json({
+          snapshot: null,
+          vehicles,
+          selectedVehicleId: null,
+          needsConnection: false,
+          message: `Connected to Tesla, but the vehicle list failed: ${describeTeslaError(error)}`,
+        })
+      }
+      row = pickFleetRow(await listVehicleRows(user.id), requestedVehicleId)
+    }
+
+    if (row) {
+      const client = buildFleetClient(user.id, row.id)
+      const { snapshot, wakeHint, authState } = await readFleetStatus(row, client)
+      const vehicles = await listVehicleSummaries(user.id).catch(() => [])
+      return NextResponse.json({
+        snapshot,
+        vehicles,
+        selectedVehicleId: row.id,
+        vehicleInfo: { id: row.provider_vehicle_id, name: row.display_name, model: row.model ?? 'Tesla' },
+        wakeHint,
+        authState,
+        message: snapshot.error?.message ?? fleetReadMessage(snapshot.collectionReason),
+      })
+    }
+
+    return NextResponse.json({
+      snapshot: null,
+      vehicles: [],
+      selectedVehicleId: null,
+      needsConnection: false,
+      message: 'Your Tesla account is connected, but the account returned no vehicles for this app. Check that the vehicle is shared with it in the Tesla app.',
+    })
+  }
+
   const row = await resolveVehicle(user.id, requestedVehicleId)
   if (!row) {
     return NextResponse.json({

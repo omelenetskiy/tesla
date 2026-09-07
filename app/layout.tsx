@@ -16,6 +16,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
     return (
         <html lang="en" suppressHydrationWarning>
+        <head>
+          {/* The basemap's style, sprites, glyphs and tiles all come from one host, and
+              the first paint waits on all four. Starting its DNS+TLS handshake while
+              the HTML parses is the cheapest available win against "the map loads
+              very slowly". */}
+          <link rel="preconnect" href="https://tiles.openfreemap.org" />
+          <link rel="dns-prefetch" href="https://tiles.openfreemap.org" />
+        </head>
         <body className={inter.className}>
         {/* Theme initialisation runs before paint to avoid a flash of the wrong
             scheme. 'system' resolves against prefers-color-scheme here exactly as

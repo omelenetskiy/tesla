@@ -96,6 +96,34 @@ const ATTRIBUTION = '© OpenStreetMap contributors, © OpenFreeMap'
 const MIN_USEFUL_ZOOM = 16
 
 /**
+ * Layers that turn into a smear above the source's native zoom.
+ *
+ * OpenFreeMap's vector tiles stop at z14 (its TileJSON says `maxzoom: 14`; a z15
+ * request returns HTTP 200 with 0 bytes), so anything closer is MapLibre magnifying a
+ * z14 tile. Roads and labels survive that fine, but the landcover/landuse fills do
+ * not: `landcover-grass` is `#d8e8c8` at full opacity, and magnified four times it
+ * becomes a huge pale-green wash over the whole box — the "strange layer, almost
+ * nothing visible" report. Hiding the fills past the native ceiling keeps the overzoom
+ * readable as a road-and-label navigation view instead.
+ */
+const OVERZOOM_SMEAR_LAYERS = [
+  'landcover-grass',
+  'landcover-grass-park',
+  'landcover-wood',
+  'landcover-sand',
+  'landuse-residential',
+  'landuse-suburb',
+  'landuse-commercial',
+  'landuse-industrial',
+  'landuse-railway',
+  'building',
+  'building-top',
+]
+
+/** Native ceiling of the OpenFreeMap vector source, from its TileJSON. */
+const SOURCE_MAX_ZOOM = 14
+
+/**
  * Last-resort local style. Only used if the remote style cannot be fetched — a
  * degraded map with plain OSM raster still beats an empty rectangle, and the
  * `degraded` note tells the operator which one they are looking at.
@@ -219,6 +247,17 @@ export const MapView = React.forwardRef<MapViewHandle, MapViewProps>(function Ma
       if (!target || parkedRef.current) return
       map.setCenter(target)
     }
+    // Past the tile source's native zoom the landcover/landuse fills magnify into a
+    // wash over the whole box, so they are hidden there and the overzoom reads as a
+    // clean road-and-label navigation view instead.
+    const applyOverzoomGuard = () => {
+      const smeared = map.getZoom() > SOURCE_MAX_ZOOM
+      for (const id of OVERZOOM_SMEAR_LAYERS) {
+        if (!map.getLayer(id)) continue
+        map.setLayoutProperty(id, 'visibility', smeared ? 'none' : 'visible')
+      }
+    }
+    map.on('zoom', applyOverzoomGuard)
     // If the remote style never becomes ready, fall back to the local raster style
     // once. A timeout is the right signal here: a single tile error is routine and
     // must not swap the style out from under a working map.
@@ -259,6 +298,7 @@ export const MapView = React.forwardRef<MapViewHandle, MapViewProps>(function Ma
       requestAnimationFrame(() => {
         map.resize()
         settleCentre()
+        applyOverzoomGuard()
       })
     })
     // MapLibre reads the container's size when it is constructed. Inside a CSS grid

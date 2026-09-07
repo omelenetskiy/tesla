@@ -209,10 +209,15 @@ export default function DashboardPage() {
 
           {!feed.loading && feed.needsConnection && (
             <section className="rounded-xl border border-line bg-surface p-4">
-              <p className="text-[14px] font-medium text-ink">No Tesla connected</p>
-              <p className="mt-1 text-[12.5px] leading-5 text-ink-secondary">Connect your Tesla to see live state, location and history.</p>
-              <Link href="/connect" className="mt-2.5 inline-flex h-10 items-center rounded-lg border border-accent bg-accent px-4 text-[13.5px] font-medium text-ink-inverse shadow-xs hover:brightness-95">
-                Connect Tesla
+              <p className="text-[14px] font-medium text-ink">No vehicle in this app yet</p>
+              {/* Worded as the two separate facts it is. Pointing "Connect Tesla" here made
+                  an already-authorized account look unauthorized, because this flag means
+                  "no local vehicle row", not "no token". */}
+              <p className="mt-1 text-[12.5px] leading-5 text-ink-secondary">
+                Authorizing the account and listing its vehicles are different steps. Settings shows which of the two is still missing.
+              </p>
+              <Link href="/settings" className="mt-2.5 inline-flex h-10 items-center rounded-lg border border-accent bg-accent px-4 text-[13.5px] font-medium text-ink-inverse shadow-xs hover:brightness-95">
+                Open settings
               </Link>
             </section>
           )}

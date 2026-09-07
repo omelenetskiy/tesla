@@ -136,9 +136,9 @@ export async function listVehicleSummaries(ownerId: string): Promise<VehicleSumm
   )
 }
 
-type SnapshotRow = { state: VehicleStatus; collected_at: string }
+export type SnapshotRow = { state: VehicleStatus; collected_at: string }
 
-async function newestSnapshot(vehicleId: string): Promise<SnapshotRow | null> {
+export async function newestSnapshot(vehicleId: string): Promise<SnapshotRow | null> {
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from('vehicle_states')
@@ -156,7 +156,7 @@ async function newestSnapshot(vehicleId: string): Promise<SnapshotRow | null> {
  * A row written by the old code carries `lastUpdated: "just now"` and a baked
  * `freshness`; both are ignored on purpose.
  */
-function toSnapshot(row: SnapshotRow, source: VehicleStatusSnapshot['source'], reason: string | null): VehicleStatusSnapshot {
+export function toSnapshot(row: SnapshotRow, source: VehicleStatusSnapshot['source'], reason: string | null): VehicleStatusSnapshot {
   const ageSeconds = Math.max(0, Math.round((Date.now() - Date.parse(row.collected_at)) / 1000))
   const freshness = ageSeconds <= 30 ? 'live' : ageSeconds <= 300 ? 'recent' : ageSeconds <= 900 ? 'stale' : 'offline'
   return {
@@ -248,7 +248,7 @@ function authStateFromError(error: unknown): TeslaAuthState {
   return 'API_UNAVAILABLE'
 }
 
-async function persistSnapshot(row: VehicleRow, status: VehicleStatus, collectedAt: string) {
+export async function persistSnapshot(row: VehicleRow, status: VehicleStatus, collectedAt: string) {
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from('vehicle_states').insert({
     vehicle_id: row.id,

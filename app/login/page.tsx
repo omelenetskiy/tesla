@@ -39,7 +39,7 @@ export default function LoginPage() {
       setLoading(false)
       return
     }
-    router.push(mode === 'signup' ? '/connect' : '/')
+    router.push('/')
     router.refresh()
   }
 
@@ -51,7 +51,7 @@ export default function LoginPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary">DriveScope</p>
         <h1 className="mt-1 text-[19px] font-semibold tracking-[-0.01em] text-ink">{mode === 'login' ? 'Sign in' : 'Create your account'}</h1>
         <p className="mt-1.5 text-[13px] leading-5 text-ink-secondary">
-          This is the app&apos;s own account. Your Tesla credentials stay on the server, encrypted, and are handled on the next screen.
+          This is the app&apos;s own account, not your Tesla account. Tesla sign-in is a separate step you complete on Tesla&apos;s own site — this app never sees your Tesla password.
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-3">

@@ -254,7 +254,7 @@ async function runAuthProbe(entryId: string, row: VehicleRow, authHost: string) 
   if (entryId === 'auth-refresh') {
     const before = await readCredential(row.id, row.owner_id)
     if (!before?.refreshToken) {
-      throw new TeslaApiError('invalid_grant', 'Refresh token is not stored — reconnect the token pair on /connect', { endpoint: '/oauth2/v3/token', method: 'POST' })
+      throw new TeslaApiError('invalid_grant', 'Refresh token is not stored — re-authorize under Settings → Tesla account', { endpoint: '/oauth2/v3/token', method: 'POST' })
     }
     const access = await refreshCredential(row.id, row.owner_id)
     const after = await readCredential(row.id, row.owner_id)

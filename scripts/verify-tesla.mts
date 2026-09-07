@@ -13,6 +13,9 @@ import { redactJsonText, redactText, sanitizeHeaders, sanitizeUrl } from '../lib
 import { deriveModel, derivePresence, freshnessFor, isVehicleAwake, milesToKm, normalizeChargeState, normalizeVehicleStatus, normalizeVehicleState } from '../lib/tesla/normalize.ts'
 import { authBaseForHost, authBaseForIssuer, teslaConfig } from '../lib/tesla/config.ts'
 import { resolveOwnerApiId } from '../lib/tesla/identity.ts'
+import { createFleetConfig, normaliseFleetRegion, consentRevokeUrl, FLEET_SCOPES, FLEET_CALLBACK_PATH } from '../lib/fleet/config.ts'
+import { assertUsableVehicleTag, fleetVehicleTag } from '../lib/fleet/client.ts'
+import { accessTokenExpiryIso, buildAuthorizationUrl as buildFleetAuthorizationUrl, createAuthorizationRequest, decodeFleetToken, exchangeAuthorizationCode, parseCallbackUrl, refreshFleetTokens, scopesFromTokenSet } from '../lib/fleet/auth.ts'
 import { buildAuthorizationUrl } from '../lib/tesla/auth.ts'
 import { DEFAULT_POLLING_POLICY, PASSIVE_POLLING_POLICY, policyFor, resolvePollingProfile, shouldCollect } from '../lib/tesla/provider.ts'
 import { TeslaClient } from '../lib/tesla/client.ts'
@@ -459,6 +462,172 @@ eq('completeness note counts missing fields', completenessNote(5, 8), '3 of 8 va
 eq('completeness note is silent when full', completenessNote(8, 8), null)
 check('day heading is today-aware', ['Today', 'Yesterday'].includes(formatDayHeading(new Date().toISOString(), Date.now())), formatDayHeading(new Date().toISOString()))
 eq('day heading yesterday', formatDayHeading(new Date(Date.now() - 86_400_000).toISOString()), 'Yesterday')
+
+// ── Fleet §4a: the pinned authentication contract ───────────────────────────
+// Each check below restates one verbatim quote from docs/TESLA_FLEET_MIGRATION_PLAN.md §4a,
+// so a future edit that "simplifies" a host, a scope or a body key fails loudly instead of
+// producing a Tesla-side error that looks like an authorization problem.
+{
+  const cfg = createFleetConfig({ region: 'eu', clientId: 'cid', clientSecret: 'sec', redirectUri: 'https://app.example.test/api/fleet/callback' })
+  eq('token endpoint is the fleet-auth domain, not auth.tesla.com', cfg.tokenUrl, 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token')
+  eq('authorize endpoint is auth.tesla.com', cfg.authorizeUrl, 'https://auth.tesla.com/oauth2/v3/authorize')
+  eq('audience is the regional Fleet API base URL', cfg.audience, 'https://fleet-api.prd.eu.vn.cloud.tesla.com')
+  eq('na region audience', createFleetConfig({ region: 'na', clientId: 'c', clientSecret: 's', redirectUri: 'https://x/cb' }).audience, 'https://fleet-api.prd.na.vn.cloud.tesla.com')
+  eq('cn region audience', createFleetConfig({ region: 'cn', clientId: 'c', clientSecret: 's', redirectUri: 'https://x/cb' }).audience, 'https://fleet-api.prd.cn.vn.cloud.tesla.cn')
+  eq('scope set is the pinned list', [...FLEET_SCOPES], ['openid', 'offline_access', 'user_data', 'vehicle_device_data', 'vehicle_location', 'vehicle_cmds', 'vehicle_charging_cmds'])
+  check('scope list says vehicle_cmds, never vehicle_commands', !FLEET_SCOPES.includes('vehicle_commands' as never))
+  // The docs' own third-party example omits vehicle_location, but vehicle_data and
+  // fleet_telemetry_config both require it — without it location comes back empty and the
+  // telemetry config is refused, each looking like an unrelated failure.
+  check('vehicle_location is requested', FLEET_SCOPES.includes('vehicle_location'))
+  check('offline_access is requested (the refresh token needs it)', FLEET_SCOPES.includes('offline_access'))
+  eq('consent revoke URL is Tesla\'s page with both params encoded', consentRevokeUrl('cid/1', 'https://app.test/settings'), 'https://auth.tesla.com/user/revoke/consent?revoke_client_id=cid%2F1&back_url=https%3A%2F%2Fapp.test%2Fsettings')
+  let refusedRegion = false
+  try {
+    normaliseFleetRegion('moon')
+  } catch {
+    refusedRegion = true
+  }
+  check('an unknown region is refused rather than defaulted', refusedRegion)
+  let configMessage = ''
+  try {
+    createFleetConfig({ region: 'eu' })
+  } catch (error) {
+    configMessage = error instanceof Error ? error.message : ''
+  }
+  check('missing env values are named together', configMessage.includes('TESLA_FLEET_CLIENT_ID') && configMessage.includes('TESLA_FLEET_CLIENT_SECRET') && configMessage.includes('TESLA_FLEET_REDIRECT_URI'), configMessage)
+  eq('redirect_uri falls back to the app url callback', createFleetConfig({ region: 'eu', clientId: 'c', clientSecret: 's', appUrl: 'https://app.test/' }).redirectUri, 'https://app.test/api/fleet/callback')
+
+  const { state, nonce } = createAuthorizationRequest()
+  check('state is url-safe randomness', state.length >= 32 && /^[A-Za-z0-9_-]+$/.test(state), state)
+  check('nonce differs from state', nonce !== state)
+  const authorize = new URL(buildFleetAuthorizationUrl({ state, nonce }, cfg))
+  eq('authorize URL is on the pinned host and path', `${authorize.origin}${authorize.pathname}`, cfg.authorizeUrl)
+  eq('response_type is code', authorize.searchParams.get('response_type'), 'code')
+  eq('scope is the pinned set, space separated', authorize.searchParams.get('scope'), FLEET_SCOPES.join(' '))
+  check('no PKCE parameters — Fleet carries a nonce instead', !authorize.searchParams.has('code_challenge') && !authorize.searchParams.has('code_challenge_method'))
+  eq('nonce is sent', authorize.searchParams.get('nonce'), nonce)
+  eq('state is sent', authorize.searchParams.get('state'), state)
+  eq('all requested scopes are required to proceed', authorize.searchParams.get('require_requested_scopes'), 'true')
+  eq('missing scopes prompt the user', authorize.searchParams.get('prompt_missing_scopes'), 'true')
+  eq('redirect_uri is the configured one', authorize.searchParams.get('redirect_uri'), cfg.redirectUri)
+}
+
+{
+  const cfg = createFleetConfig({ region: 'eu', clientId: 'cid', clientSecret: 'sec', redirectUri: 'https://app.example.test/api/fleet/callback' })
+  const makeJwt = (claims: Record<string, unknown>) => {
+    const enc = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url')
+    return `${enc({ alg: 'ES256', typ: 'JWT' })}.${enc(claims)}.sig`
+  }
+  const originalFetch = globalThis.fetch
+  let seen: { url: string; contentType: string | null; form: URLSearchParams } | null = null
+  const stub = (body: unknown, status = 200) => {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>
+      seen = { url: String(input), contentType: headers['Content-Type'] ?? null, form: new URLSearchParams(String(init?.body ?? '')) }
+      return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+  }
+  try {
+    stub({ access_token: makeJwt({ exp: Math.floor(Date.now() / 1000) + 3600, scp: ['vehicle_cmds', 'openid'] }), expires_in: 3600, refresh_token: 'rotating-1', scope: 'openid offline_access vehicle_cmds' })
+    const tokens = await exchangeAuthorizationCode({ code: 'the-code' }, cfg)
+    eq('code exchange posts to the pinned token URL', seen?.url ?? '', cfg.tokenUrl)
+    eq('code exchange is form-urlencoded', seen?.contentType ?? '', 'application/x-www-form-urlencoded')
+    eq('grant_type', seen?.form.get('grant_type') ?? '', 'authorization_code')
+    eq('client_id is sent', seen?.form.get('client_id') ?? '', 'cid')
+    eq('client_secret is sent', seen?.form.get('client_secret') ?? '', 'sec')
+    eq('code is sent', seen?.form.get('code') ?? '', 'the-code')
+    eq('audience is the regional base URL', seen?.form.get('audience') ?? '', 'https://fleet-api.prd.eu.vn.cloud.tesla.com')
+    eq('redirect_uri is echoed', seen?.form.get('redirect_uri') ?? '', cfg.redirectUri)
+    check('no client_assertion on the third-party flow', !seen?.form.has('client_assertion') && !seen?.form.has('client_assertion_type'))
+    check('no PKCE verifier is sent', !seen?.form.has('code_verifier'))
+    eq('scopes merge the response field with the token claims', (scopesFromTokenSet(tokens) ?? []).sort(), ['offline_access', 'openid', 'vehicle_cmds'])
+    eq('expiry comes from the JWT exp claim', accessTokenExpiryIso(tokens.access_token)?.slice(0, 11), new Date(Date.now() + 3600_000).toISOString().slice(0, 11))
+    eq('claims decode', decodeFleetToken(tokens.access_token)?.scp, ['vehicle_cmds', 'openid'])
+
+    seen = null
+    await refreshFleetTokens('rotating-1', cfg)
+    eq('refresh grant_type', seen?.form.get('grant_type') ?? '', 'refresh_token')
+    eq('refresh sends client_id and the rotating token', [seen?.form.get('client_id'), seen?.form.get('refresh_token')], ['cid', 'rotating-1'])
+    check('refresh sends no client secret (§4a lists three keys only)', !seen?.form.has('client_secret'))
+
+    stub({ error: 'invalid_grant', error_description: 'code_verifier_was_used' }, 400)
+    let rejected: unknown = null
+    try {
+      await exchangeAuthorizationCode({ code: 'replay' }, cfg)
+    } catch (error) {
+      rejected = error
+    }
+    check('a 400 from the token endpoint is invalid_grant', rejected instanceof TeslaApiError && rejected.kind === 'invalid_grant', String(rejected))
+
+    stub('<html><body>Bad Gateway</body></html>', 502)
+    let nonJson: unknown = null
+    try {
+      await refreshFleetTokens('rotating-1', cfg)
+    } catch (error) {
+      nonJson = error
+    }
+    check('a non-JSON token answer is malformed, not a crash', nonJson instanceof TeslaApiError && nonJson.kind === 'malformed', String(nonJson))
+
+    stub('Please complete the captcha to continue', 403)
+    let challenged: unknown = null
+    try {
+      await refreshFleetTokens('rotating-1', cfg)
+    } catch (error) {
+      challenged = error
+    }
+    check('a WAF answer is reported as a challenge, not as a bad token', challenged instanceof TeslaApiError && challenged.kind === 'challenge', String(challenged))
+
+    const parsed = parseCallbackUrl('https://app.example.test/api/fleet/callback?code=abc123&state=xyz', 'xyz')
+    eq('callback code is read', parsed.code, 'abc123')
+    let stateMismatch: unknown = null
+    try {
+      parseCallbackUrl('https://app.example.test/cb?code=abc&state=other', 'xyz')
+    } catch (error) {
+      stateMismatch = error
+    }
+    check('a mismatched state is refused', stateMismatch instanceof TeslaApiError && stateMismatch.kind === 'invalid_grant', String(stateMismatch))
+    let userDenied: unknown = null
+    try {
+      parseCallbackUrl('https://app.example.test/cb?error=access_denied&error_description=User+refused')
+    } catch (error) {
+      userDenied = error
+    }
+    check('a refusal is reported with Tesla wording', userDenied instanceof TeslaApiError && /access_denied/.test(userDenied.message), String(userDenied))
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+
+// ── Fleet vehicle_tag rule + the callback guard ─────────────────────────────
+// {vehicle_tag} accepts the VIN or the short id (the working reference app resolves it as
+// `v.id_s || String(v.id)`), and rejects the long streaming id.
+eq('VIN is accepted', assertUsableVehicleTag('5YJ3E1IA7KF000001'), '5YJ3E1IA7KF000001')
+eq('short id is accepted', assertUsableVehicleTag('100021'), '100021')
+eq('the long streaming vehicle_id is refused', (() => {
+  try {
+    assertUsableVehicleTag('3744651726645272')
+    return 'accepted'
+  } catch (error) {
+    return error instanceof TeslaApiError ? error.kind : 'wrong error'
+  }
+})(), 'not_found')
+eq('no usable tag is reported as null, not sent as a bare path', fleetVehicleTag({ vin: null, owner_api_id: '3744651726645272' }), null)
+eq('VIN wins over the short id', fleetVehicleTag({ vin: '5YJ3E1IA7KF000001', owner_api_id: '100021' }), '5YJ3E1IA7KF000001')
+eq('the short id is used when no VIN is stored', fleetVehicleTag({ vin: null, owner_api_id: '100021' }), '100021')
+eq('an empty row has no tag', fleetVehicleTag({}), null)
+
+// A stale redirect URI is the bug that made login look like it worked: Tesla authorized the
+// user and redirected to a route that no longer exists, consuming the one-time code on a 404.
+{
+  const stale = createFleetConfig({ region: 'eu', clientId: 'c', clientSecret: 's', redirectUri: 'http://localhost:3000/api/tesla/auth/callback' })
+  check('a callback path that is not our route is flagged', stale.redirectPathWarning !== null && stale.redirectPathWarning.includes(FLEET_CALLBACK_PATH), String(stale.redirectPathWarning))
+  check('the flag names the value to use instead', (stale.redirectPathWarning ?? '').includes('http://localhost:3000/api/fleet/callback'), String(stale.redirectPathWarning))
+  const good = createFleetConfig({ region: 'eu', clientId: 'c', clientSecret: 's', redirectUri: `http://localhost:3000${FLEET_CALLBACK_PATH}` })
+  eq('the correct route is not flagged', good.redirectPathWarning, null)
+  eq('scopes fall back to the pinned set', good.scopes, [...FLEET_SCOPES])
+  eq('TESLA_FLEET_SCOPES overrides verbatim', createFleetConfig({ region: 'eu', clientId: 'c', clientSecret: 's', redirectUri: 'http://l/x'.replace('/x', FLEET_CALLBACK_PATH), scopeOverride: 'openid vehicle_device_data' }).scopes, ['openid', 'vehicle_device_data'])
+}
 
 console.log(`\n  ${passed} checks passed`)
 if (failures.length) {
