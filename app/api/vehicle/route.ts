@@ -1,56 +1,79 @@
 import { NextResponse } from 'next/server'
-import { getTeslaVehicle } from '@/lib/tesla-api'
-import { decryptSecret } from '@/lib/crypto'
 import { getAuthenticatedUser } from '@/lib/supabase-server'
-import { getSupabaseAdmin } from '@/lib/supabase'
+import { legacyVehicleFromStatus } from '@/lib/tesla/compat'
+import { listVehicleSummaries, readVehicleStatus, resolveVehicle } from '@/lib/tesla/service'
 
 export const dynamic = 'force-dynamic'
 
+/**
+ * GET /api/vehicle — the dashboard's single read.
+ *
+ * Accepts `?vehicle=<uuid>` for the selector and `?fresh=true&allowWake=true` for
+ * the explicit, confirmed current-status action. Everything else is decided by the
+ * state-aware polling policy, so ordinary navigation costs zero Tesla requests once
+ * a fresh snapshot exists (§21, §48).
+ */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Authentication required' }, { status: 401 })
-  const supabase = getSupabaseAdmin()
-  const { data: vehicleRecord, error: vehicleError } = await supabase.from('vehicles').select('id, provider_vehicle_id').eq('owner_id', user.id).eq('is_active', true).order('created_at').limit(1).maybeSingle()
-  if (vehicleError) return NextResponse.json({ message: vehicleError.message }, { status: 500 })
-  if (!vehicleRecord) return NextResponse.json({ message: 'Connect a Tesla vehicle before loading telemetry' }, { status: 404 })
+  if (!user) return NextResponse.json({ message: 'Требуется вход в приложение' }, { status: 401 })
 
   const url = new URL(request.url)
-  const fresh = url.searchParams.get('fresh') === 'true'
-  const allowWake = url.searchParams.get('allowWake') === 'true'
-
-  if (!fresh) {
-    const { data: cached } = await supabase.from('vehicle_states').select('state, collected_at').eq('vehicle_id', vehicleRecord.id).order('collected_at', { ascending: false }).limit(1).maybeSingle()
-    if (!cached) return NextResponse.json({ message: 'No cached vehicle data yet' }, { status: 404 })
+  const requestedVehicleId = url.searchParams.get('vehicle')
+  const row = await resolveVehicle(user.id, requestedVehicleId)
+  if (!row) {
     return NextResponse.json({
-      source: 'cache',
-      collection: 'skipped',
-      reason: 'passive_default',
-      message: 'Cached data returned. No Tesla request was made.',
-      vehicle: cached.state,
-      collectedAt: cached.collected_at,
+      message: 'Автомобиль не подключён',
+      needsConnection: true,
+      status: null,
+      vehicle: null,
+      vehicles: [],
     })
   }
 
-  if (!allowWake) {
-    return NextResponse.json({
-      source: 'cache',
-      collection: 'skipped',
-      reason: 'wake_confirmation_required',
-      message: 'Fresh collection requires explicit wake confirmation.',
-    }, { status: 409 })
-  }
+  const force = url.searchParams.get('fresh') === 'true'
+  const mayWake = url.searchParams.get('allowWake') === 'true'
+  const snapshot = await readVehicleStatus({ row, force, mayWake })
+  const vehicles = await listVehicleSummaries(user.id).catch(() => [])
 
-  try {
-    const { data: credential, error: credentialError } = await supabase.from('vehicle_credentials').select('access_token_ciphertext').eq('vehicle_id', vehicleRecord.id).eq('owner_id', user.id).single()
-    if (credentialError || !credential) throw new Error('Tesla Owner API is not connected')
-    const vehicle = await getTeslaVehicle(decryptSecret(credential.access_token_ciphertext), vehicleRecord.provider_vehicle_id)
-    await supabase.from('vehicle_states').insert({ vehicle_id: vehicleRecord.id, provider_vehicle_id: vehicleRecord.provider_vehicle_id, state: vehicle })
-    await supabase.from('collection_events').insert({ vehicle_id: vehicleRecord.id, owner_id: user.id, outcome: 'success', reason: 'explicit_current_status' })
-    return NextResponse.json({ source: 'tesla_api', collection: 'success', vehicle })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Tesla API request failed'
-    await supabase.from('collection_events').insert({ vehicle_id: vehicleRecord.id, owner_id: user.id, outcome: 'failed', reason: message })
-    const { data: cached } = await supabase.from('vehicle_states').select('state, collected_at').eq('vehicle_id', vehicleRecord.id).order('collected_at', { ascending: false }).limit(1).maybeSingle()
-    return NextResponse.json({ source: 'cache', collection: 'failed', reason: message, vehicle: cached?.state, collectedAt: cached?.collected_at }, { status: 502 })
+  const legacy = snapshot.status
+    ? legacyVehicleFromStatus(snapshot.status, row.display_name, snapshot.ageSeconds)
+    : null
+
+  return NextResponse.json({
+    // New contract.
+    snapshot: { ...snapshot },
+    vehicles,
+    selectedVehicleId: row.id,
+    // Temporary projection for the pre-redesign dashboard (lib/tesla/compat.ts).
+    vehicle: legacy,
+    vehicleInfo: { id: row.provider_vehicle_id, name: row.display_name, model: row.model ?? 'Tesla' },
+    source: snapshot.source,
+    collection: snapshot.error ? 'failed' : snapshot.source === 'cache' ? 'skipped' : 'success',
+    reason: snapshot.collectionReason,
+    collectedAt: snapshot.status ? snapshot.collectedAt : null,
+    wakeHint: snapshot.wakeHint,
+    authState: snapshot.authState,
+    message: snapshot.error?.message ?? cacheMessage(snapshot.collectionReason, snapshot.source),
+  })
+}
+
+/** Russian copy for the cache/skip outcomes, kept out of the service layer (§D3). */
+function cacheMessage(reason: string | null, source: string): string | undefined {
+  if (source === 'tesla_api') return undefined
+  switch (reason) {
+    case 'vehicle_sleeping':
+      return 'Автомобиль спит. Показаны последние сохранённые данные.'
+    case 'wake_confirmation_required':
+      return 'Нужно подтверждение на «Запросить актуальный статус» — это может разбудить автомобиль.'
+    case 'fresh_cache':
+    case 'within_live_interval':
+      return undefined
+    case 'status_check_failed':
+    case 'collection_failed':
+      return 'Не удалось обновить данные. Показаны последние сохранённые значения.'
+    case 'vehicle_sleeping_no_cache':
+      return 'Автомобиль спит. Сохранённых данных пока нет.'
+    default:
+      return undefined
   }
 }

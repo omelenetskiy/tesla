@@ -28,6 +28,9 @@ export async function proxy(request: NextRequest) {
   if (user && request.nextUrl.pathname === '/login') {
     return NextResponse.redirect(new URL('/', request.url))
   }
+  if (request.nextUrl.pathname === '/api/tesla/auth/callback') {
+    return NextResponse.rewrite(new URL(`/api/tesla/auth/complete${request.nextUrl.search}`, request.url))
+  }
   return response
 }
 

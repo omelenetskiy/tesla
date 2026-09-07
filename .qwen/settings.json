@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Agent(Explore)",
+      "Bash(npm run *)",
+      "Bash(npx *)",
+      "Bash(cd *)",
+      "Bash(echo *)",
+      "Bash(cat *)"
+    ]
+  },
+  "$version": 4
+}

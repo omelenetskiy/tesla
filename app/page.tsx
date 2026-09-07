@@ -1,43 +1,631 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, BatteryCharging, Bell, Car, Check, ChevronDown, Cloud, Gauge, Lock, MapPin, Menu, Navigation, Radio, Settings2, ShieldCheck, Thermometer, TrendingDown, TrendingUp, Wifi, X } from 'lucide-react'
+import { Battery, BatteryCharging, Car, Clock, Gauge, LogOut, MapPin, Menu, Moon, RefreshCw, Route, Settings2, ShieldCheck, Snowflake, Sun, Thermometer, TrendingDown, Wifi, X, Zap } from 'lucide-react'
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import LiveMap from './components/live-map'
-import { alerts, chartData, chargingSessions, freshnessLabel, trips, vehicles as demoVehicles, type Alert, type Vehicle } from './data'
+import type { Freshness, Vehicle } from './data'
+import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 
-const navItems = [
-  ['Overview', Gauge], ['Vehicle', Car], ['Live Map', MapPin], ['Trips', Navigation],
-  ['Charging', BatteryCharging], ['Energy', TrendingUp], ['Health', ShieldCheck], ['Alerts', Bell], ['Settings', Settings2],
-] as const
+// ─── Types ───────────────────────────────────────────────────────────────────
+type VehicleInfo = { id: string; name: string; model: string }
+type Page = 'Обзор' | 'Поездки' | 'Батарея' | 'Зарядки' | 'Настройки'
+type BatteryPoint = { at: string; battery: number; range: number; charging: string }
+type ChargeSession = { startedAt: string; endedAt: string; batteryStart: number; batteryEnd: number; energyAdded: number | null; peakPower: number | null; durationMinutes: number }
+type TripPoint = { at: string; battery: number; speed: number }
+type Trip = { startedAt: string; endedAt: string; odometerStart: number; odometerEnd: number; distance: number; route: [number, number][]; batteryStart: number; batteryEnd: number; durationMinutes: number; avgSpeed: number; maxSpeed: number; points: TripPoint[] }
+type History = { battery: BatteryPoint[]; charging: ChargeSession[]; trips: Trip[]; stats: { current: number; minimum: number; maximum: number; discharged: number; snapshots: number } | null }
 
-function StatusBadge({ vehicle }: { vehicle: Vehicle }) { return <span className={`status-badge status-${vehicle.state.toLowerCase()}`}><i />{vehicle.state}</span> }
-function Freshness({ vehicle }: { vehicle: Vehicle }) { return <span className={`freshness freshness-${vehicle.freshness.toLowerCase()}`}><i />{freshnessLabel(vehicle.freshness)} · {vehicle.lastUpdated}</span> }
-function Metric({ label, value, unit, note, trend }: { label: string; value: string | number; unit?: string; note?: string; trend?: 'up' | 'down' }) { return <div className="metric"><span className="metric-label">{label}</span><strong>{value}<small>{unit}</small></strong>{note && <span className="metric-note">{trend === 'down' && <TrendingDown size={13} />}{note}</span>}</div> }
-function SectionHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) { return <div className="section-header"><div><h2>{title}</h2>{subtitle && <p>{subtitle}</p>}</div>{action}</div> }
-function VehicleRow({ vehicle, onOpen }: { vehicle: Vehicle; onOpen: () => void }) { return <button className="vehicle-row selected" onClick={onOpen}><span className="vehicle-dot" style={{ background: vehicle.color }} /><span className="vehicle-row-main"><strong>{vehicle.name}</strong><small>{vehicle.model}</small></span><StatusBadge vehicle={vehicle} /><span className="vehicle-row-battery">{vehicle.battery}%</span><Freshness vehicle={vehicle} /><ChevronDown size={15} className="row-chevron" /></button> }
-function EmptyState({ title, text }: { title: string; text: string }) { return <div className="empty-state"><ShieldCheck size={22} /><strong>{title}</strong><p>{text}</p></div> }
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+const stateLabels: Record<string, string> = { Driving: 'В движении', Parked: 'Припаркована', Charging: 'Заряжается', Offline: 'Неактивна' }
+const navItems: Array<[Page, typeof Gauge]> = [['Обзор', Gauge], ['Поездки', Route], ['Батарея', TrendingDown], ['Зарядки', BatteryCharging], ['Настройки', Settings2]]
 
-function Overview({ vehicle, navigate }: { vehicle: Vehicle; navigate: (page: string) => void }) {
-  const unread = alerts.filter((alert) => alert.status === 'Unread').length
-  return <><div className="hero-row"><div><p className="eyebrow">VEHICLE OVERVIEW</p><h1>Good morning, Alex.</h1><p className="lede">A calm view of your Tesla, its last known state, and what needs attention.</p></div><button className="secondary-button" onClick={() => navigate('Live Map')}><MapPin size={16} />Open live map</button></div><section className="overview-top"><div className="fleet-focus"><div className="focus-heading"><div><span className="overline">VEHICLE STATUS</span><h2>{vehicle.name} is {vehicle.state.toLowerCase()}</h2></div><Freshness vehicle={vehicle} /></div><div className="fleet-counts"><div className="fleet-count primary"><strong>{vehicle.battery}%</strong><span>Battery</span></div><div className="fleet-count"><strong>{vehicle.range}</strong><span>Range</span></div><div className="fleet-count"><strong>{vehicle.speed}</strong><span>Speed</span></div><div className="fleet-count"><strong>{vehicle.odometer.toLocaleString()}</strong><span>Odometer</span></div></div><div className="fleet-bar"><i className={vehicle.state.toLowerCase()} style={{ width: '100%' }} /></div><div className="focus-footer"><span><Wifi size={14} /> {vehicle.connectivity}</span><span><ShieldCheck size={14} /> Sleep-safe collection active</span></div></div><div className="alert-summary"><div className="summary-top"><span className="overline">NEEDS ATTENTION</span><AlertTriangle size={17} /></div><strong>{unread} open alerts</strong><p>{alerts.find((alert) => alert.status === 'Unread')?.title ?? 'No outstanding alerts'}</p><button className="text-link" onClick={() => navigate('Alerts')}>Review alerts <span>→</span></button></div></section><div className="overview-grid"><section className="surface chart-surface"><SectionHeader title="Energy used" subtitle="Vehicle consumption over the last 7 days" /><div className="chart-meta"><strong>150.1 <small>kWh</small></strong><span className="trend-down"><TrendingDown size={14} /> 8.6% vs prior period</span></div><div className="bar-chart large">{chartData.map((point, index) => <div className="chart-column" key={point.day}><span className="chart-value">{point.energy}</span><i style={{ height: `${point.energy * 2.4}%` }} className={index === 5 ? 'highlight' : ''} /><small>{point.day.replace('Sep ', '')}</small></div>)}</div><div className="chart-legend"><span><i className="legend-blue" /> Energy consumed</span><span>kWh</span></div></section><section className="surface recent-surface"><SectionHeader title="Recent activity" /><div className="timeline"><div className="timeline-item"><span className="timeline-icon blue"><BatteryCharging size={16} /></span><div><strong>Charging session completed</strong><p>{vehicle.name} · Rose Quarter Garage</p></div><time>1h ago</time></div><div className="timeline-item"><span className="timeline-icon green"><Car size={16} /></span><div><strong>Trip completed</strong><p>{vehicle.name} · Alberta Arts to Hawthorne</p></div><time>2h ago</time></div><div className="timeline-item"><span className="timeline-icon orange"><Bell size={16} /></span><div><strong>Vehicle went offline</strong><p>{vehicle.name} · Last known location</p></div><time>41m ago</time></div></div><button className="view-all" onClick={() => navigate('Alerts')}>View activity history <span>→</span></button></section></div><section className="surface vehicle-surface"><SectionHeader title="Your vehicle" subtitle="Current telemetry for your connected Tesla" action={<button className="text-link" onClick={() => navigate('Vehicle')}>Open vehicle details <span>→</span></button>} /><VehicleRow vehicle={vehicle} onOpen={() => navigate('Vehicle')} /></section></>
+function timeLabel(value: string) { return new Intl.DateTimeFormat('ru-RU', { timeStyle: 'short' }).format(new Date(value)) }
+function dateTimeLabel(value: string) { return new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) }
+function minutesLabel(minutes: number) { return minutes < 60 ? `${minutes} мин` : `${Math.floor(minutes / 60)} ч ${minutes % 60} мин` }
+
+function dayGroupLabel(value: string) {
+  const date = new Date(value)
+  const today = new Date()
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1)
+  const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
+  if (sameDay(date, today)) return 'Сегодня'
+  if (sameDay(date, yesterday)) return 'Вчера'
+  return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'long' }).format(date)
 }
 
-function VehiclePage({ vehicle }: { vehicle: Vehicle }) { return <><SectionHeader title="Vehicle" subtitle="Your current vehicle and its latest telemetry" /><section className="surface detail-surface"><div className="detail-heading"><div><span className="overline">CONNECTED VEHICLE</span><h2>{vehicle.name} <span>{vehicle.model}</span></h2></div><StatusBadge vehicle={vehicle} /></div><div className="detail-grid"><Metric label="Battery" value={vehicle.battery} unit="%" note={`${vehicle.range} mi estimated range`} /><Metric label="Speed" value={vehicle.speed} unit="mph" note={vehicle.state === 'Driving' ? 'Moving now' : 'Stationary'} /><Metric label="Odometer" value={vehicle.odometer.toLocaleString()} unit="mi" /><div className="detail-location"><span className="metric-label">LAST KNOWN LOCATION</span><strong><MapPin size={16} />{vehicle.location}</strong><Freshness vehicle={vehicle} /></div></div><div className="technical-grid"><span><Lock size={15} /> {vehicle.lockState}</span><span><Thermometer size={15} /> Climate {vehicle.climate}</span><span><Wifi size={15} /> {vehicle.connectivity}</span><span><Cloud size={15} /> Software {vehicle.software}</span></div></section></> }
-function LiveMapPage({ vehicle }: { vehicle: Vehicle }) { return <><SectionHeader title="Live Map" subtitle="The latest known position of your Tesla" /><div className="map-layout"><div className="map-frame"><LiveMap vehicle={vehicle} onSelectAction={() => undefined} /><div className="map-note"><span><ShieldCheck size={14} /> Latest known location, loaded from cache</span></div></div><aside className="map-detail"><div className="selected-marker" style={{ background: vehicle.color }}><Car size={22} /></div><StatusBadge vehicle={vehicle} /><h2>{vehicle.name}</h2><p>{vehicle.model}</p><div className="map-detail-metrics"><Metric label="Battery" value={vehicle.battery} unit="%" /><Metric label="Range" value={vehicle.range} unit="mi" /><Metric label="Speed" value={vehicle.speed} unit="mph" /></div><div className="map-detail-list"><span><MapPin size={15} />{vehicle.location}</span><span><BatteryCharging size={15} />{vehicle.chargingState}</span><span><Thermometer size={15} />Climate {vehicle.climate}</span></div><Freshness vehicle={vehicle} /></aside></div></> }
-function TripsPage({ vehicle }: { vehicle: Vehicle }) { return <><SectionHeader title="Trips" subtitle="A chronological driving journal" action={<div className="filters"><button>Last 7 days <ChevronDown size={14} /></button></div>} /><div className="trip-list">{['Today', 'Yesterday', 'Sep 04'].map((day) => <div className="trip-day" key={day}><h3>{day}</h3>{trips.filter((trip) => trip.date === day).map((trip) => <div className="trip-row" key={trip.id}><span className="trip-time">{trip.startTime}<small>{trip.endTime}</small></span><span className="trip-route"><strong>{trip.start} <span>→</span> {trip.destination}</strong><small>{vehicle.name} · {trip.duration}</small></span><span className="trip-stat"><strong>{trip.distance} mi</strong><small>Distance</small></span><span className="trip-stat"><strong>{trip.batteryStart}% <span>→</span> {trip.batteryEnd}%</strong><small>Battery used</small></span><span className="trip-stat"><strong>{trip.energy} kWh</strong><small>Energy</small></span></div>)}</div>)}</div></> }
-function ChargingPage() { return <><SectionHeader title="Charging" subtitle="Charging history for your Tesla" action={<div className="filters"><button>Last 30 days <ChevronDown size={14} /></button></div>} /><div className="kpi-strip"><Metric label="Total energy" value="159.3" unit="kWh" /><Metric label="Sessions" value="4" /><Metric label="Average session" value="4h 06m" /><Metric label="Estimated cost" value="$35.58" /></div><section className="surface records-surface"><SectionHeader title="Charging sessions" subtitle="Energy added and session context" /><div className="record-head"><span>SESSION</span><span>BATTERY</span><span>ENERGY</span><span>COST</span></div>{chargingSessions.map((session) => <div className="record-row" key={session.id}><span className="record-location"><BatteryCharging size={16} /><strong>{session.location}</strong><small>{session.date} · {session.duration} · {session.chargerType}</small></span><span>{session.batteryBefore}% <span className="muted">to</span> {session.batteryAfter}%</span><strong>{session.energy} kWh</strong><span>${session.cost.toFixed(2)}</span></div>)}</section></> }
-function EnergyPage() { return <><SectionHeader title="Energy" subtitle="Consumption and efficiency for your Tesla" action={<div className="filters"><button className="active">Week</button><button>Month</button><button>Custom</button></div>} /><div className="kpi-strip energy-kpis"><Metric label="Energy consumed" value="150.1" unit="kWh" note="8.6% vs prior" trend="down" /><Metric label="Distance driven" value="418.7" unit="mi" /><Metric label="Avg. efficiency" value="358" unit="Wh/mi" /><Metric label="Estimated cost" value="$26.40" /></div><div className="energy-grid"><section className="surface energy-chart"><SectionHeader title="Consumption over time" subtitle="Daily vehicle energy use" /><div className="line-chart"><div className="grid-lines"><i /><i /><i /><i /></div><div className="line-path">{chartData.map((point, index) => <span key={point.day} style={{ left: `${index * 16.66}%`, bottom: `${point.energy * 2.2}%` }}><b>{point.energy}</b></span>)}</div><div className="chart-axis">{chartData.map((point) => <span key={point.day}>{point.day.replace('Sep ', '')}</span>)}</div></div></section><section className="surface efficiency-surface"><SectionHeader title="Efficiency" subtitle="Average Wh per mile" /><div className="efficiency-number">358 <small>Wh/mi</small></div><div className="efficiency-bar"><i style={{ width: '68%' }} /></div><p>Within your 330-390 Wh/mi seasonal range.</p><div className="efficiency-note"><Check size={14} /> No unusual consumption detected</div></section></div></> }
-function AlertsPage() { const [filter, setFilter] = useState('All'); const visible = alerts.filter((alert) => filter === 'All' || alert.severity === filter); return <><SectionHeader title="Alerts" subtitle="Issues and updates that need your attention" action={<div className="filters">{['All', 'Critical', 'Warning', 'Information'].map((item) => <button className={filter === item ? 'active' : ''} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div>} /><section className="surface alerts-surface">{visible.map((alert) => <AlertRow alert={alert} key={alert.id} />)}{visible.length === 0 && <EmptyState title="No alerts in this view" text="Nothing matches the selected severity." />}</section></> }
-function AlertRow({ alert }: { alert: Alert }) { return <div className="alert-row"><span className={`alert-icon ${alert.severity.toLowerCase()}`}>{alert.severity === 'Warning' ? <AlertTriangle size={17} /> : alert.severity === 'Critical' ? <X size={17} /> : <Bell size={17} />}</span><div><div className="alert-title"><strong>{alert.title}</strong><span className={`severity ${alert.severity.toLowerCase()}`}>{alert.severity}</span></div><p>{alert.detail}</p><small>Juniper · {alert.time}</small></div><span className={`alert-status ${alert.status.toLowerCase()}`}>{alert.status}</span></div> }
-function HealthPage({ vehicle }: { vehicle: Vehicle }) { return <><SectionHeader title="Vehicle health" subtitle="A quick read on connectivity, software, and service signals" /><div className="health-grid"><section className="surface health-card"><div className="health-card-heading"><div><strong>{vehicle.name}</strong><small>{vehicle.model}</small></div><span className={`health-status ${vehicle.health.toLowerCase()}`}><i />{vehicle.health}</span></div><p>{vehicle.healthNote}</p><div className="health-details"><span><Wifi size={14} /> {vehicle.connectivity}</span><span><Cloud size={14} /> {vehicle.software}</span><span><BatteryCharging size={14} /> Battery {vehicle.battery}%</span></div></section></div></> }
-function SettingsPage() { return <><SectionHeader title="Settings" subtitle="Configure your account and collection preferences" /><div className="settings-grid"><section className="surface settings-section"><h2>Collection policy</h2><p>Sleep-safe mode keeps ordinary browsing passive and never wakes your vehicle.</p><div className="setting-row"><div><strong>Sleep-safe collection</strong><small>Use cached data unless you explicitly request a fresh status.</small></div><span className="toggle on"><i /></span></div><div className="setting-row"><div><strong>Notify when the vehicle goes offline</strong><small>Send an alert after 15 minutes without telemetry.</small></div><span className="toggle on"><i /></span></div></section><section className="surface settings-section"><h2>Display</h2><p>Choose how telemetry is presented throughout the app.</p><div className="setting-row"><div><strong>Distance</strong><small>Used for range, trips, and odometer.</small></div><button className="value-button">Miles <ChevronDown size={14} /></button></div><div className="setting-row"><div><strong>Temperature</strong><small>Used for climate and battery health.</small></div><button className="value-button">Celsius <ChevronDown size={14} /></button></div></section></div></> }
+function groupByDay<T extends { startedAt: string }>(items: T[]) {
+  const groups: Array<[string, T[]]> = []
+  for (const item of items) {
+    const label = dayGroupLabel(item.startedAt)
+    const group = groups.find(([existing]) => existing === label)
+    if (group) group[1].push(item)
+    else groups.push([label, [item]])
+  }
+  return groups
+}
 
+const freshnessMeta: Record<Freshness, { label: string; tone: 'live' | 'stale' | 'offline' }> = {
+  LIVE: { label: 'Подключено', tone: 'live' },
+  RECENT: { label: 'Обновлено недавно', tone: 'live' },
+  STALE: { label: 'Данные устарели', tone: 'stale' },
+  OFFLINE: { label: 'Автомобиль offline', tone: 'offline' },
+}
+
+function connectionState(vehicle: Vehicle | null, sleeping: boolean, statusCheckFailed: boolean) {
+  if (sleeping) return { label: 'Машина спит', tone: 'offline' as const }
+  if (statusCheckFailed) return { label: 'Статус недоступен', tone: 'stale' as const }
+  if (!vehicle) return { label: 'Нет данных', tone: 'offline' as const }
+  return freshnessMeta[vehicle.freshness]
+}
+
+// ─── Theme Toggle ────────────────────────────────────────────────────────────
+function ThemeToggle() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light')
+  useEffect(() => {
+    const stored = localStorage.getItem('theme') as 'light' | 'dark' | null
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const initial = stored || (prefersDark ? 'dark' : 'light')
+    // Apply theme to DOM immediately (outside React state) to avoid flash
+    document.documentElement.setAttribute('data-theme', initial)
+    // Sync React state after paint via requestAnimationFrame
+    const raf = requestAnimationFrame(() => setTheme(initial))
+    return () => cancelAnimationFrame(raf)
+  }, [])
+  const toggle = () => {
+    const next = theme === 'light' ? 'dark' : 'light'
+    document.documentElement.setAttribute('data-theme', next)
+    localStorage.setItem('theme', next)
+    setTheme(next)
+  }
+  return (
+    <button className="theme-toggle" onClick={toggle} aria-label="Переключить тему" title="Переключить тему">
+      {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+    </button>
+  )
+}
+
+// ─── Freshness Badge ─────────────────────────────────────────────────────────
+function FreshnessBadge({ vehicle, sleeping, statusCheckFailed }: { vehicle: Vehicle | null; sleeping: boolean; statusCheckFailed: boolean }) {
+  const meta = connectionState(vehicle, sleeping, statusCheckFailed)
+  return <span className={`badge badge-${meta.tone}`}><i />{meta.label}</span>
+}
+
+// ─── Metric ──────────────────────────────────────────────────────────────────
+function Metric({ label, value, unit, note }: { label: string; value: string | number; unit?: string; note?: string }) {
+  return (
+    <div className="metric card">
+      <span className="metric-label">{label}</span>
+      <span className="metric-value">{value}{unit && <span className="metric-unit">{unit}</span>}</span>
+      {note && <span className="metric-note">{note}</span>}
+    </div>
+  )
+}
+
+// ─── Empty State ─────────────────────────────────────────────────────────────
+function EmptyState({ icon: Icon, title, text }: { icon: typeof Route; title: string; text: string }) {
+  return (
+    <div className="empty">
+      <div className="empty-icon"><Icon size={32} /></div>
+      <strong>{title}</strong>
+      <p>{text}</p>
+    </div>
+  )
+}
+
+// ─── Skeleton ───────────────────────────────────────────────────────────────
+function SkeletonMetrics() {
+  return (
+    <div className="metrics-row">
+      {[0,1,2,3].map(i => <div key={i} className="metric card"><div className="skeleton skeleton-text" /><div className="skeleton skeleton-metric" style={{marginTop:8}} /></div>)}
+    </div>
+  )
+}
+
+function SkeletonChart() { return <div className="card"><div className="skeleton skeleton-chart" /></div> }
+function SkeletonMap() { return <div className="skeleton skeleton-map" /> }
+
+// ─── MAIN DASHBOARD COMPONENT ────────────────────────────────────────────────
 export default function Dashboard() {
-  const router = useRouter(); const [active, setActive] = useState('Overview'); const [vehicle, setVehicle] = useState<Vehicle>(demoVehicles[0]); const [menuOpen, setMenuOpen] = useState(false); const [syncState, setSyncState] = useState('Cached'); const [requestState, setRequestState] = useState<'idle' | 'confirm' | 'loading' | 'error'>('idle'); const [requestError, setRequestError] = useState('')
-  useEffect(() => { let cancelled = false; fetch('/api/vehicle').then(async (response) => { const payload = await response.json(); if (response.status === 404) { router.push('/connect'); return null }; if (!response.ok) throw new Error(payload.message || 'Vehicle data unavailable'); return payload }).then((payload) => { if (!cancelled && payload?.vehicle) { setVehicle(payload.vehicle); setSyncState(payload.source === 'tesla_api' ? 'Tesla API' : 'Cached') } }).catch(() => undefined); return () => { cancelled = true } }, [router])
-  function navigate(page: string) { setActive(page); setMenuOpen(false) }
-  async function requestCurrentStatus() { if (requestState === 'idle') { setRequestState('confirm'); return }; setRequestState('loading'); setSyncState('Requesting'); try { const response = await fetch('/api/vehicle?fresh=true&allowWake=true'); const payload = await response.json(); if (payload.vehicle) setVehicle(payload.vehicle); if (!response.ok && !payload.vehicle) throw new Error(payload.message || payload.reason || 'Current status is unavailable'); setSyncState(payload.source === 'tesla_api' ? 'Tesla API' : 'Cached fallback'); if (payload.collection === 'failed') { setRequestError(payload.reason || 'Tesla API request failed'); setRequestState('error') } else setRequestState('idle') } catch (error) { setRequestError(error instanceof Error ? error.message : 'Current status is unavailable'); setSyncState('Cached'); setRequestState('error') } }
-  const buttonLabel = requestState === 'confirm' ? 'Confirm wake request' : requestState === 'loading' ? 'Requesting...' : 'Request current status'
-  return <main className="app-shell"><aside className={`sidebar ${menuOpen ? 'sidebar-open' : ''}`}><div className="brand"><span className="brand-mark"><Radio size={16} /></span><span><strong>DRIVE / SCOPE</strong><small>TESLA TELEMETRY</small></span></div><button className="vehicle-selector" onClick={() => navigate('Vehicle')}><span className="vehicle-selector-dot" /><span><strong>{vehicle.name}</strong><small>{vehicle.model}</small></span><ChevronDown size={15} /></button><nav aria-label="Primary navigation"><span className="nav-section-label">VEHICLE</span>{navItems.map(([label, Icon]) => <button className={`nav-item ${active === label ? 'active' : ''}`} key={label} onClick={() => navigate(label)}><Icon size={17} /><span>{label}</span>{label === 'Alerts' && <em>1</em>}</button>)}</nav><div className="sidebar-footer"><div className="connection"><i /><span><strong>Connected</strong><small>Cache-first mode</small></span></div><p className="disclaimer">Unofficial Tesla companion application</p></div></aside><section className="workspace"><header className="topbar"><button className="menu-button" aria-label="Open navigation" onClick={() => setMenuOpen(!menuOpen)}><Menu size={20} /></button><div className="topbar-title"><span>{active}</span><small>{vehicle.name} · {syncState}</small></div><div className="topbar-actions"><button className="request-status" onClick={requestCurrentStatus} disabled={requestState === 'loading'}>{buttonLabel}</button><button className="icon-button" aria-label="Notifications"><Bell size={17} /></button><span className="live-status"><i /> {syncState.toUpperCase()}</span></div></header>{requestState === 'confirm' && <div className="request-banner" role="alert"><strong>Current data may wake the vehicle.</strong><span>Use this only when a fresh status is necessary. Ordinary browsing stays cache-only.</span><button className="text-link" onClick={() => setRequestState('idle')}>Cancel</button></div>}{requestState === 'error' && <div className="request-banner error" role="alert"><strong>Fresh status was not available.</strong><span>{requestError}. Cached data remains visible.</span><button className="text-link" onClick={() => setRequestState('idle')}>Dismiss</button></div>}<div className="content">{active === 'Overview' && <Overview vehicle={vehicle} navigate={navigate} />}{active === 'Vehicle' && <VehiclePage vehicle={vehicle} />}{active === 'Live Map' && <LiveMapPage vehicle={vehicle} />}{active === 'Trips' && <TripsPage vehicle={vehicle} />}{active === 'Charging' && <ChargingPage />}{active === 'Energy' && <EnergyPage />}{active === 'Health' && <HealthPage vehicle={vehicle} />}{active === 'Alerts' && <AlertsPage />}{active === 'Settings' && <SettingsPage />}<p className="demo-note">Cached by default · server-side Tesla request only after explicit wake confirmation</p></div></section></main>
+  const router = useRouter()
+  const supabase = createSupabaseBrowserClient()
+  const [page, setPage] = useState<Page>('Обзор')
+  const [vehicle, setVehicle] = useState<Vehicle | null>(null)
+  const [vehicleInfo, setVehicleInfo] = useState<VehicleInfo | null>(null)
+  const [history, setHistory] = useState<History>({ battery: [], charging: [], trips: [], stats: null })
+  const [collectedAt, setCollectedAt] = useState<string | null>(null)
+  const [sleeping, setSleeping] = useState(false)
+  const [statusCheckFailed, setStatusCheckFailed] = useState(false)
+  const [error, setError] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [confirmWake, setConfirmWake] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [selectedTrip, setSelectedTrip] = useState(0)
+  const [loadingInitial, setLoadingInitial] = useState(true)
+
+  async function loadHistory() {
+    const response = await fetch('/api/history')
+    if (!response.ok) return
+    setHistory(await response.json() as History)
+  }
+
+  async function loadVehicle(fresh = false) {
+    setLoading(true)
+    setError('')
+    try {
+      const response = await fetch(fresh ? '/api/vehicle?fresh=true&allowWake=true' : '/api/vehicle')
+      const payload = await response.json() as { message?: string; vehicle?: Vehicle | null; vehicleInfo?: VehicleInfo; source?: string; collection?: string; collectedAt?: string; reason?: string }
+      if (response.status === 404) throw new Error(payload.message || 'Подключите Tesla')
+      if (!response.ok && !payload.vehicle) throw new Error(payload.message || payload.reason || 'Не удалось получить данные')
+      if (payload.vehicleInfo) setVehicleInfo(payload.vehicleInfo)
+      if (payload.vehicle) setVehicle(payload.vehicle)
+      if (payload.collectedAt) setCollectedAt(payload.collectedAt)
+      if (payload.collection === 'failed') setError(payload.message || payload.reason || 'Не удалось получить актуальный статус Tesla')
+      setSleeping(payload.reason === 'vehicle_sleeping' || payload.reason === 'vehicle_sleeping_no_cache')
+      setStatusCheckFailed(payload.reason === 'status_check_failed' || payload.reason === 'status_check_failed_no_cache')
+      await loadHistory()
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Не удалось получить данные')
+    } finally { setLoading(false); setLoadingInitial(false) }
+  }
+
+  useEffect(() => { const timer = window.setTimeout(() => { void loadVehicle() }, 0); return () => window.clearTimeout(timer) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function requestStatus() {
+    if (!confirmWake) { setConfirmWake(true); return }
+    setConfirmWake(false)
+    await loadVehicle(true)
+  }
+
+  async function logout() {
+    await supabase.auth.signOut()
+    router.replace('/login')
+    router.refresh()
+  }
+
+  const name = vehicle?.name || vehicleInfo?.name || 'Tesla'
+  const model = vehicle?.model || vehicleInfo?.model || 'Автомобиль подключён'
+  const selected = history.trips[selectedTrip]
+
+  // ── RENDER ──────────────────────────────────────────────────────────────
+  return (
+    <div className="app-shell">
+      {/* ── TOP BAR ─────────────────────────────────────────────────── */}
+      <header className="topbar">
+        <button className="topbar-btn" style={{display:'none'}} onClick={() => setSidebarOpen(!sidebarOpen)} aria-label="Меню"><Menu size={18} /></button>
+        <div className="topbar-brand"><span className="topbar-brand-icon"><Car size={16} /></span>DRIVE / SCOPE</div>
+        <div className="topbar-vehicle">
+          <span className="topbar-vehicle-dot" />
+          <strong>{name}</strong>
+          <span>{model}</span>
+        </div>
+        <div className="topbar-spacer" />
+        <div className="topbar-actions">
+          <FreshnessBadge vehicle={vehicle} sleeping={sleeping} statusCheckFailed={statusCheckFailed} />
+          <button className="topbar-btn" onClick={() => void loadVehicle()} disabled={loading} title="Обновить"><RefreshCw size={16} style={loading ? {animation:'spin 1s linear infinite'} : {}} /></button>
+          <ThemeToggle />
+          <button className="topbar-btn" onClick={() => void logout()} title="Выйти"><LogOut size={16} /></button>
+        </div>
+      </header>
+
+      {/* ── BODY ────────────────────────────────────────────────────── */}
+      <div className="app-body">
+        {/* Sidebar backdrop (mobile) */}
+        {sidebarOpen && <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+
+        {/* Sidebar */}
+        <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
+          <div className="sidebar-label">Навигация</div>
+          <nav className="sidebar-nav" aria-label="Основная навигация">
+            {navItems.map(([label, Icon]) => (
+              <button key={label} className={`sidebar-item ${page === label ? 'active' : ''}`} onClick={() => { setPage(label); setSidebarOpen(false) }}>
+                <Icon size={17} />{label}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-footer">
+            <div className={`sidebar-freshness ${sleeping || statusCheckFailed ? 'offline' : vehicle?.freshness === 'STALE' ? 'stale' : ''}`}>
+              <span className="sidebar-freshness-dot" />
+              {connectionState(vehicle, sleeping, statusCheckFailed).label}
+            </div>
+            <button className="sidebar-logout" onClick={() => void logout()}><LogOut size={14} />Выйти</button>
+          </div>
+        </aside>
+
+        {/* Content */}
+        <main className="content">
+          <div className="content-inner">
+            {error && (
+              <div className="card" style={{marginBottom:16,borderColor:'var(--red-border)',background:'var(--red-soft)',padding:'12px 16px',display:'flex',alignItems:'center',gap:12}}>
+                <X size={17} style={{color:'var(--red)',flexShrink:0}} />
+                <span style={{flex:1,fontSize:13,color:'var(--red)'}}>{error}</span>
+                {error.toLowerCase().includes('token') || error.toLowerCase().includes('credentials') ? <a href="/connect" style={{fontSize:12,fontWeight:700}}>Переподключить</a> : null}
+                <button onClick={() => setError('')} style={{border:0,background:'transparent',color:'var(--red)',cursor:'pointer'}} aria-label="Закрыть"><X size={15} /></button>
+              </div>
+            )}
+            {confirmWake && (
+              <div className="card" style={{marginBottom:16,borderColor:'var(--orange-border)',background:'var(--orange-soft)',padding:'14px 16px',display:'flex',alignItems:'center',gap:16}}>
+                <div style={{flex:1}}><strong style={{fontSize:13}}>Запрос может разбудить автомобиль</strong><p style={{margin:'4px 0 0',fontSize:12,color:'var(--ink-secondary)'}}>Подтвердите, если нужен актуальный статус.</p></div>
+                <button className="btn btn-primary btn-sm" onClick={() => void requestStatus()}>Разбудить</button>
+                <button className="btn btn-sm" onClick={() => setConfirmWake(false)}>Отмена</button>
+              </div>
+            )}
+
+            {/* Page content */}
+            {loadingInitial ? (
+              <>
+                <div className="page-header"><h1>Обзор</h1><p>Загрузка данных…</p></div>
+                <SkeletonMap />
+                <div style={{height:16}} />
+                <SkeletonMetrics />
+              </>
+            ) : page === 'Настройки' ? (
+              <SettingsView name={name} model={model} />
+            ) : !vehicle ? (
+              <EmptyVehicle name={name} sleeping={sleeping} onRequest={() => void requestStatus()} loading={loading} />
+            ) : page === 'Зарядки' ? (
+              <ChargingView vehicle={vehicle} sessions={history.charging} />
+            ) : page === 'Поездки' ? (
+              <TripsView vehicle={vehicle} trips={history.trips} selectedTrip={selected} selectedIndex={selectedTrip} onSelect={setSelectedTrip} />
+            ) : page === 'Батарея' ? (
+              <BatteryView battery={history.battery} stats={history.stats} />
+            ) : (
+              <OverviewView vehicle={vehicle} history={history} collectedAt={collectedAt} sleeping={sleeping} statusCheckFailed={statusCheckFailed} onRequest={() => void requestStatus()} loading={loading} />
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}
+
+// ─── EMPTY VEHICLE ───────────────────────────────────────────────────────────
+function EmptyVehicle({ name, sleeping, onRequest, loading }: { name: string; sleeping: boolean; onRequest: () => void; loading: boolean }) {
+  return (
+    <>
+      <div className="page-header"><h1>{name}</h1><p>{sleeping ? 'Машина спит · сохранённых данных нет' : 'Подключено, но snapshot ещё не получен'}</p></div>
+      <EmptyState icon={Gauge} title={sleeping ? 'Машина спит' : 'Телеметрия ещё не собрана'} text={sleeping ? 'Последних сохранённых данных нет. Запросить актуальный статус можно отдельно.' : 'Обычная загрузка проверяет статус без пробуждения и читает только кэш.'} />
+      <div style={{display:'flex',justifyContent:'center',marginTop:16}}>
+        <button className="btn btn-primary" onClick={onRequest} disabled={loading}>{loading ? 'Запрос…' : 'Запросить статус'}</button>
+      </div>
+    </>
+  )
+}
+
+// ── OVERVIEW ────────────────────────────────────────────────────────────────
+function OverviewView({ vehicle, history, collectedAt, sleeping, statusCheckFailed, onRequest, loading }: { vehicle: Vehicle; history: History; collectedAt: string | null; sleeping: boolean; statusCheckFailed: boolean; onRequest: () => void; loading: boolean }) {
+  const stateBadgeClass = vehicle.state === 'Driving' ? 'badge-driving' : vehicle.state === 'Charging' ? 'badge-charging' : 'badge-parked'
+  return (
+    <>
+      {/* Page header */}
+      <div className="page-header">
+        <div className="page-header-row">
+          <div>
+            <h1>{vehicle.name}</h1>
+            <p>{vehicle.model} · {collectedAt ? `Обновлено ${dateTimeLabel(collectedAt)}` : 'Данные ещё не получены'}</p>
+          </div>
+          <div className="page-header-actions">
+            <span className={`badge ${stateBadgeClass}`}><i />{stateLabels[vehicle.state] || vehicle.state}</span>
+            <button className="btn" onClick={onRequest} disabled={loading}><RefreshCw size={15} />Статус</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Map — dominant element */}
+      <div className="card" style={{marginBottom:16,overflow:'hidden'}}>
+        {vehicle.coordinates ? (
+          <div style={{position:'relative'}}>
+            <LiveMap vehicle={vehicle} onSelectAction={() => undefined} fullHeight />
+            <div className="vehicle-card-float">
+              <div className="vehicle-card-float-name"><span className={`badge ${stateBadgeClass}`}><i /></span>{vehicle.name}</div>
+              <div className="vehicle-card-float-state">{stateLabels[vehicle.state]} · {vehicle.location || 'Координаты не переданы'}</div>
+              <div className="vehicle-card-float-metrics">
+                <div><span>Батарея</span><strong>{vehicle.battery}%</strong></div>
+                <div><span>Запас</span><strong>{vehicle.range}</strong></div>
+                <div><span>Скорость</span><strong>{vehicle.speed}</strong></div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{minHeight:300,display:'grid',placeItems:'center',color:'var(--ink-tertiary)',textAlign:'center',padding:32}}>
+            <MapPin size={28} style={{marginBottom:8,opacity:0.5}} /><p style={{fontSize:13}}>В последнем snapshot нет координат автомобиля.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Key metrics */}
+      <div className="metrics-row" style={{marginBottom:16}}>
+        <Metric label="Заряд" value={vehicle.battery} unit="%" />
+        <Metric label="Запас хода" value={vehicle.range} unit="миль" />
+        <Metric label="Скорость" value={vehicle.speed} unit="миль/ч" />
+        <Metric label="Мощность" value={vehicle.chargePower == null ? '—' : vehicle.chargePower} unit={vehicle.chargePower == null ? undefined : 'кВт'} />
+      </div>
+
+      {/* Activity + Vehicle status */}
+      <div style={{display:'grid',gridTemplateColumns:'1.1fr .9fr',gap:16}}>
+        <div className="card">
+          <div className="card-header">
+            <div className="card-header-title"><span className="card-overline">АКТИВНОСТЬ</span><span className="card-title">Недавние события</span></div>
+            <span style={{fontSize:12,color:'var(--ink-tertiary)'}}>{history.trips.length + history.charging.length} событий</span>
+          </div>
+          <div className="records">
+            {history.trips.slice(0, 3).map((trip) => (
+              <div className="record" key={`trip-${trip.startedAt}`}>
+                <span className="record-icon blue"><Route size={15} /></span>
+                <div className="record-body"><strong>Поездка завершена</strong><span>{dateTimeLabel(trip.endedAt)} · {trip.distance.toFixed(1)} миль</span></div>
+              </div>
+            ))}
+            {history.charging.slice(0, 3).map((session) => (
+              <div className="record" key={`charge-${session.startedAt}`}>
+                <span className="record-icon green"><BatteryCharging size={15} /></span>
+                <div className="record-body"><strong>Зарядка</strong><span>{dateTimeLabel(session.startedAt)} · {session.batteryStart}% → {session.batteryEnd}%</span></div>
+              </div>
+            ))}
+            {!history.trips.length && !history.charging.length && (
+              <div style={{padding:24,textAlign:'center',color:'var(--ink-tertiary)',fontSize:12}}>Активность появится после накопления snapshots.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div className="card-header-title"><span className="card-overline">АВТОМОБИЛЬ</span><span className="card-title">Состояние</span></div>
+            <span className="badge badge-live"><i />{vehicle.connectivity}</span>
+          </div>
+          <div className="records">
+            <div className="record"><BatteryCharging size={16} style={{color:'var(--blue)'}} /><div className="record-body"><strong>Зарядка</strong></div><span className="record-value">{vehicle.chargingState}</span></div>
+            <div className="record"><Thermometer size={16} style={{color:'var(--blue)'}} /><div className="record-body"><strong>Салон</strong></div><span className="record-value">{vehicle.climate}</span></div>
+            <div className="record"><Gauge size={16} style={{color:'var(--blue)'}} /><div className="record-body"><strong>Пробег</strong></div><span className="record-value">{vehicle.odometer.toLocaleString('ru-RU')} миль</span></div>
+            <div className="record"><Wifi size={16} style={{color:'var(--blue)'}} /><div className="record-body"><strong>ПО</strong></div><span className="record-value">{vehicle.software}</span></div>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ─── TRIPS ───────────────────────────────────────────────────────────────────
+function TripsView({ vehicle, trips, selectedTrip, selectedIndex, onSelect }: { vehicle: Vehicle; trips: Trip[]; selectedTrip?: Trip; selectedIndex: number; onSelect: (index: number) => void }) {
+  const [metric, setMetric] = useState<'battery' | 'speed'>('battery')
+  const chartPoints = useMemo(() => (selectedTrip?.points || []).map((point) => ({ ...point, label: timeLabel(point.at) })), [selectedTrip])
+
+  if (!trips.length) {
+    return (
+      <>
+        <div className="page-header"><h1>Поездки</h1><p>История поездок на основе сохранённых snapshots</p></div>
+        <EmptyState icon={Route} title="Поездок пока нет" text="Collector ещё не накопил online snapshots в состоянии движения." />
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="page-header"><h1>Поездки</h1><p>Выберите поездку, чтобы увидеть маршрут и статистику</p></div>
+      <div className="map-layout">
+        {/* Sidebar — trip list */}
+        <div className="map-layout-sidebar">
+          <div className="map-layout-sidebar-header"><strong>История</strong></div>
+          <div className="map-layout-sidebar-body">
+            {groupByDay(trips).map(([day, group]) => (
+              <div key={day}>
+                <div className="day-label">{day}</div>
+                <div className="records">
+                  {group.map((trip) => {
+                    const index = trips.indexOf(trip)
+                    return (
+                      <button key={trip.startedAt} className={`record ${index === selectedIndex ? 'selected' : ''}`} onClick={() => onSelect(index)}>
+                        <span className="record-icon blue"><Route size={15} /></span>
+                        <div className="record-body">
+                          <strong>{timeLabel(trip.startedAt)} — {timeLabel(trip.endedAt)}</strong>
+                          <span>{trip.batteryStart}% → {trip.batteryEnd}% · {minutesLabel(trip.durationMinutes)}</span>
+                        </div>
+                        <span className="record-value">{trip.distance.toFixed(1)} миль</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Map */}
+        <div className="map-layout-map">
+          {selectedTrip && vehicle.coordinates ? (
+            <LiveMap vehicle={vehicle} route={selectedTrip.route} focusCoordinates={selectedTrip.route[0] || vehicle.coordinates} onSelectAction={() => undefined} />
+          ) : (
+            <div style={{minHeight:400,display:'grid',placeItems:'center',color:'var(--ink-tertiary)'}}><p>Выберите поездку для отображения маршрута</p></div>
+          )}
+        </div>
+      </div>
+
+      {/* Trip detail */}
+      {selectedTrip && (
+        <div className="trip-detail">
+          <div className="trip-detail-header">
+            <strong>Детали поездки</strong>
+            <span style={{fontSize:12,color:'var(--ink-tertiary)'}}>{timeLabel(selectedTrip.startedAt)} — {timeLabel(selectedTrip.endedAt)}</span>
+          </div>
+          <div className="trip-detail-stats">
+            <div className="trip-detail-stat"><div className="trip-detail-stat-label">Расстояние</div><div className="trip-detail-stat-value">{selectedTrip.distance.toFixed(1)} <small style={{fontSize:12,fontWeight:400}}>миль</small></div></div>
+            <div className="trip-detail-stat"><div className="trip-detail-stat-label">Длительность</div><div className="trip-detail-stat-value">{minutesLabel(selectedTrip.durationMinutes)}</div></div>
+            <div className="trip-detail-stat"><div className="trip-detail-stat-label">Ср. скорость</div><div className="trip-detail-stat-value">{selectedTrip.avgSpeed} <small style={{fontSize:12,fontWeight:400}}>миль/ч</small></div></div>
+            <div className="trip-detail-stat"><div className="trip-detail-stat-label">Батарея</div><div className="trip-detail-stat-value">{selectedTrip.batteryStart}% → {selectedTrip.batteryEnd}%</div></div>
+          </div>
+          {chartPoints.length > 1 && (
+            <div className="trip-detail-chart">
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+                <span style={{fontSize:11,fontWeight:600,letterSpacing:'0.06em',textTransform:'uppercase',color:'var(--ink-tertiary)'}}>График</span>
+                <div className="range-selector">
+                  <button className={`range-btn ${metric === 'battery' ? 'active' : ''}`} onClick={() => setMetric('battery')}>Заряд</button>
+                  <button className={`range-btn ${metric === 'speed' ? 'active' : ''}`} onClick={() => setMetric('speed')}>Скорость</button>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={chartPoints}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{fontSize:10}} />
+                  <YAxis tick={{fontSize:10}} domain={metric === 'battery' ? [0, 100] : undefined} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey={metric} name={metric === 'battery' ? 'Заряд, %' : 'Скорость'} stroke="var(--blue)" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ─── BATTERY ─────────────────────────────────────────────────────────────────
+const batteryRanges: Array<[string, number | null]> = [['24ч', 1], ['7д', 7], ['30д', 30], ['90д', 90], ['Все', null]]
+
+function BatteryView({ battery, stats }: { battery: BatteryPoint[]; stats: History['stats'] }) {
+  const [range, setRange] = useState<number | null>(7)
+  const filtered = useMemo(() => {
+    if (range == null || !battery.length) return battery
+    const latest = Date.parse(battery[battery.length - 1].at)
+    const cutoff = latest - range * 86_400_000
+    return battery.filter((point) => Date.parse(point.at) >= cutoff)
+  }, [battery, range])
+
+  if (!battery.length) {
+    return (
+      <>
+        <div className="page-header"><h1>Батарея</h1><p>Текущий заряд, тренд и энергопотребление</p></div>
+        <EmptyState icon={Battery} title="Данных нет" text="Недостаточно данных для построения графика батареи." />
+      </>
+    )
+  }
+
+  const current = filtered.length ? filtered[filtered.length - 1].battery : battery[battery.length - 1].battery
+  const chart = filtered.map((point) => ({ ...point, label: range === 1 ? timeLabel(point.at) : new Intl.DateTimeFormat('ru-RU', {day:'2-digit',month:'short'}).format(new Date(point.at)) }))
+
+  return (
+    <>
+      <div className="page-header"><h1>Батарея</h1><p>Текущий заряд и тренд из сохранённых snapshots</p></div>
+
+      {/* Hero */}
+      <div className="card battery-hero" style={{marginBottom:16}}>
+        <div className="hero-big">{current}<small>%</small></div>
+        <div className="hero-context">
+          <div style={{fontSize:13,color:'var(--ink-secondary)'}}>Текущий заряд</div>
+          <div className="hero-context-row">
+            <div className="hero-context-item"><span>Минимум</span><strong>{stats?.minimum ?? '—'}%</strong></div>
+            <div className="hero-context-item"><span>Максимум</span><strong>{stats?.maximum ?? '—'}%</strong></div>
+            <div className="hero-context-item"><span>Разряд</span><strong>{stats?.discharged ?? '—'}%</strong></div>
+          </div>
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-header">
+          <div className="card-header-title"><span className="card-overline">ИСТОРИЯ</span><span className="card-title">Уровень заряда</span></div>
+          <div className="range-selector">
+            {batteryRanges.map(([label, value]) => (
+              <button key={label} className={`range-btn ${range === value ? 'active' : ''}`} onClick={() => setRange(value)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{padding:'0 8px 8px'}}>
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={chart}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="label" tick={{fontSize:10}} />
+              <YAxis domain={[0, 100]} tick={{fontSize:10}} />
+              <Tooltip />
+              <Line type="monotone" dataKey="battery" name="Заряд, %" stroke="var(--blue)" strokeWidth={2.5} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Health — only if data available */}
+      <div className="card">
+        <div className="card-header">
+          <div className="card-header-title"><span className="card-overline">ЗДОРОВЬЕ</span><span className="card-title">Состояние батареи</span></div>
+        </div>
+        <div style={{padding:16,fontSize:13,color:'var(--ink-tertiary)'}}>
+          <p style={{margin:0}}>Данные о деградации и циклах зарядки недоступны через Owner API.</p>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ─── CHARGING ────────────────────────────────────────────────────────────────
+function ChargingView({ vehicle, sessions }: { vehicle: Vehicle; sessions: ChargeSession[] }) {
+  const isCharging = vehicle.state === 'Charging'
+
+  return (
+    <>
+      <div className="page-header"><h1>Зарядки</h1><p>Текущая сессия и история зарядок</p></div>
+
+      {/* Current charging hero */}
+      {isCharging && (
+        <div className="card charging-hero" style={{marginBottom:16,borderColor:'var(--green-border)',background:'var(--green-soft)'}}>
+          <div className="hero-big" style={{color:'var(--green)'}}>{vehicle.battery}<small>%</small></div>
+          <div className="hero-context">
+            <div style={{fontSize:13,color:'var(--ink-secondary)'}}>Сейчас заряжается</div>
+            <div className="hero-context-row">
+              <div className="hero-context-item"><span>Мощность</span><strong>{vehicle.chargePower ?? '—'}{vehicle.chargePower != null && ' кВт'}</strong></div>
+              <div className="hero-context-item"><span>Добавлено</span><strong>{vehicle.energyAdded == null ? '—' : `${vehicle.energyAdded.toFixed(1)} кВт·ч`}</strong></div>
+              <div className="hero-context-item"><span>Осталось</span><strong>{vehicle.timeToFullCharge == null ? '—' : minutesLabel(Math.round(vehicle.timeToFullCharge * 60))}</strong></div>
+            </div>
+            <div style={{marginTop:10,fontSize:12,color:'var(--ink-tertiary)'}}><MapPin size={13} style={{display:'inline',marginRight:4,verticalAlign:'middle'}} />{vehicle.location || 'Локация не передана'}</div>
+          </div>
+        </div>
+      )}
+
+      {/* History */}
+      {!sessions.length ? (
+        <EmptyState icon={BatteryCharging} title="Зарядок пока нет" text="Collector ещё не накопил периоды зарядки. Запуск cron не будит машину." />
+      ) : (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-header-title"><span className="card-overline">ИСТОРИЯ</span><span className="card-title">Зарядки</span></div>
+          </div>
+          {groupByDay(sessions).map(([day, group]) => (
+            <div key={day}>
+              <div className="day-label">{day}</div>
+              <div className="records">
+                {group.map((session) => (
+                  <div className="record" key={session.startedAt}>
+                    <span className="record-icon green"><BatteryCharging size={15} /></span>
+                    <div className="record-body">
+                      <strong>{timeLabel(session.startedAt)} — {timeLabel(session.endedAt)}</strong>
+                      <span>{session.batteryStart}% → {session.batteryEnd}% · {minutesLabel(session.durationMinutes)}</span>
+                    </div>
+                    <span className="record-value">{session.energyAdded == null ? '—' : `${session.energyAdded.toFixed(1)} кВт·ч`}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+function SettingsView({ name, model }: { name: string; model: string }) {
+  return (
+    <>
+      <div className="page-header"><h1>Настройки</h1><p>Управление подключением и сбором данных</p></div>
+      <div className="card">
+        <div className="card-header">
+          <div className="card-header-title"><span className="card-overline">АВТОМОБИЛЬ</span><span className="card-title">{name}</span></div>
+          <span style={{fontSize:12,color:'var(--ink-tertiary)'}}>{model}</span>
+        </div>
+        <div style={{padding:16,fontSize:13,color:'var(--ink-secondary)'}}>
+          <p style={{margin:'0 0 12px'}}>Фоновый collector сначала проверяет состояние через Owner API и сохраняет предыдущие данные, если машина неактивна.</p>
+          <p style={{margin:0}}>Сбор данных по умолчанию — <strong>Passive</strong> (пассивный). Автомобиль не будет разбужен без вашего явного подтверждения.</p>
+        </div>
+      </div>
+    </>
+  )
 }

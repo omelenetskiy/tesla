@@ -1,47 +1,78 @@
+import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { decryptSecret } from '@/lib/crypto'
 import { getSupabaseAdmin } from '@/lib/supabase'
-import { getTeslaVehicle, getTeslaVehicles } from '@/lib/tesla-api'
+import { readHistory, persistDerivedHistory } from '@/lib/tesla/history'
+import { pruneRequestLogs } from '@/lib/tesla/request-log'
+import { listAllVehicleRows, readVehicleStatus } from '@/lib/tesla/service'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 60
 
+function secretMatches(provided: string): boolean {
+  const expected = process.env.COLLECTION_CRON_SECRET
+  if (!expected) return false
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  // Same-length compare only: a short-circuit === would leak the secret's length.
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
+/**
+ * Background collector. Browser tabs never poll the vehicle (AGENTS.md §3.2); this
+ * scheduled endpoint does the waking-free collection instead.
+ *
+ * Order per vehicle: policy-gated status read → snapshot write → history derivation
+ * → idempotent persistence. A sleeping vehicle produces exactly one cheap
+ * `/api/1/vehicles/{id}` call and no telemetry request (§21).
+ */
 export async function POST(request: Request) {
-  const authorization = request.headers.get('authorization')
-  if (!process.env.COLLECTION_CRON_SECRET || authorization !== `Bearer ${process.env.COLLECTION_CRON_SECRET}`) {
-    return NextResponse.json({ message: 'Invalid collection credential' }, { status: 401 })
+  const authorization = request.headers.get('authorization') ?? ''
+  const bearer = authorization.replace(/^Bearer\s+/i, '')
+  if (!process.env.COLLECTION_CRON_SECRET || !secretMatches(bearer)) {
+    return NextResponse.json({ message: 'Неверный ключ сбора данных' }, { status: 401 })
   }
 
-  const supabase = getSupabaseAdmin()
-  const { data: vehicleRecords, error } = await supabase.from('vehicles').select('id, owner_id, provider_vehicle_id').eq('is_active', true)
-  if (error) return NextResponse.json({ message: error.message }, { status: 500 })
+  const rows = await listAllVehicleRows()
+  const results: Array<{ vehicleId: string; outcome: string; reason: string; telemetry: boolean; persisted: unknown }> = []
 
-  const results: Array<{ vehicleId: string; outcome: string; reason: string }> = []
-  for (const vehicle of vehicleRecords ?? []) {
+  for (const row of rows) {
     try {
-      const { data: credential } = await supabase.from('vehicle_credentials').select('access_token_ciphertext').eq('vehicle_id', vehicle.id).single()
-      if (!credential) {
-        results.push({ vehicleId: vehicle.id, outcome: 'skipped', reason: 'owner_api_not_connected' })
+      const snapshot = await readVehicleStatus({ row })
+      if (snapshot.error) {
+        results.push({ vehicleId: row.id, outcome: 'failed', reason: snapshot.error.kind, telemetry: false, persisted: null })
         continue
       }
-      const accessToken = decryptSecret(credential.access_token_ciphertext)
-      const providerVehicles = await getTeslaVehicles(accessToken)
-      const providerVehicle = providerVehicles.find((item) => String(item.id) === vehicle.provider_vehicle_id || String(item.vehicle_id) === vehicle.provider_vehicle_id)
-      if (!providerVehicle || providerVehicle.state !== 'online') {
-        const reason = providerVehicle ? 'vehicle_sleeping_or_offline' : 'vehicle_not_found'
-        await supabase.from('collection_events').insert({ vehicle_id: vehicle.id, owner_id: vehicle.owner_id, outcome: 'skipped', reason })
-        results.push({ vehicleId: vehicle.id, outcome: 'skipped', reason })
+      if (snapshot.source !== 'tesla_api') {
+        results.push({ vehicleId: row.id, outcome: 'skipped', reason: snapshot.collectionReason ?? 'no_collection', telemetry: false, persisted: null })
         continue
       }
-      const snapshot = await getTeslaVehicle(accessToken, vehicle.provider_vehicle_id)
-      await supabase.from('vehicle_states').insert({ vehicle_id: vehicle.id, provider_vehicle_id: vehicle.provider_vehicle_id, state: snapshot })
-      await supabase.from('collection_events').insert({ vehicle_id: vehicle.id, owner_id: vehicle.owner_id, outcome: 'success', reason: 'vehicle_online' })
-      results.push({ vehicleId: vehicle.id, outcome: 'success', reason: 'vehicle_online' })
-    } catch (collectionError) {
-      const reason = collectionError instanceof Error ? collectionError.message : 'collection_failed'
-      await supabase.from('collection_events').insert({ vehicle_id: vehicle.id, owner_id: vehicle.owner_id, outcome: 'failed', reason })
-      results.push({ vehicleId: vehicle.id, outcome: 'failed', reason })
+      const bundle = await readHistory(row.id, '7d')
+      const persisted = await persistDerivedHistory({ vehicleId: row.id, ownerId: row.owner_id, bundle })
+      results.push({ vehicleId: row.id, outcome: 'success', reason: 'telemetry_collected', telemetry: true, persisted })
+    } catch (error) {
+      results.push({
+        vehicleId: row.id,
+        outcome: 'failed',
+        reason: error instanceof Error ? error.message.slice(0, 200) : 'collection_failed',
+        telemetry: false,
+        persisted: null,
+      })
     }
   }
 
-  return NextResponse.json({ collectedAt: new Date().toISOString(), results })
+  // Retention is enforced by the job that always runs, not by a human remembering.
+  const pruned = await pruneRequestLogs(7).catch(() => 0)
+  const auditable = rows[0]
+  if (auditable) {
+    const supabase = getSupabaseAdmin()
+    await supabase.from('collection_events').insert({
+      vehicle_id: null,
+      owner_id: auditable.owner_id,
+      outcome: results.some((result) => result.outcome === 'success') ? 'success' : 'skipped',
+      reason: `collection_run:${results.length}_vehicles`,
+    })
+  }
+
+  return NextResponse.json({ collectedAt: new Date().toISOString(), results, prunedLogs: pruned })
 }
