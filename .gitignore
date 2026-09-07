@@ -1,0 +1,21 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# TeslaMate import files
+import/*
+!import/.gitkeep
+
+# Local database backups
+backups/
+
+# Next.js build output and dependencies
+node_modules/
+.next/
+out/
+
+# macOS / editor files
+.DS_Store
+.idea/
+
