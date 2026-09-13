@@ -34,6 +34,22 @@ export type VehicleRow = {
 
 const VEHICLE_COLUMNS = 'id, owner_id, provider_vehicle_id, display_name, model, collection_mode, is_active, created_at'
 const VEHICLE_COLUMNS_EXTENDED = `${VEHICLE_COLUMNS}, polling_profile, vehicle_tag_id, vehicle_id, distance_unit, vin`
+const VEHICLE_COLUMNS_LEGACY = VEHICLE_COLUMNS
+
+function missingVehicleColumn(message: string | undefined): boolean {
+  return /vehicles\.(vehicle_tag_id|polling_profile|vehicle_id|distance_unit|vin) does not exist|column .* does not exist/i.test(message ?? '')
+}
+
+function withExtendedDefaults(rows: VehicleRow[]): VehicleRow[] {
+  return rows.map((row) => ({
+    ...row,
+    polling_profile: row.polling_profile ?? null,
+    vehicle_tag_id: row.vehicle_tag_id ?? null,
+    vehicle_id: row.vehicle_id ?? null,
+    distance_unit: row.distance_unit ?? null,
+    vin: row.vin ?? null,
+  }))
+}
 
 /**
  * `{id}` resolution lives in `lib/tesla/identity.ts` so the rule itself is testable
@@ -46,30 +62,57 @@ function vehicleTagIdOf(row: VehicleRow): string | null {
 
 export async function listVehicleRows(ownerId: string): Promise<VehicleRow[]> {
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase
+  const primary = await supabase
     .from('vehicles')
     .select(VEHICLE_COLUMNS_EXTENDED)
     .eq('owner_id', ownerId)
     .eq('is_active', true)
     .order('created_at', { ascending: true })
-  if (error) {
-    throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${error.message}`)
+  if (!primary.error) {
+    return withExtendedDefaults((primary.data ?? []) as VehicleRow[])
   }
-  return (data ?? []) as VehicleRow[]
+
+  if (missingVehicleColumn(primary.error.message)) {
+    const fallback = await supabase
+      .from('vehicles')
+      .select(VEHICLE_COLUMNS_LEGACY)
+      .eq('owner_id', ownerId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+    if (fallback.error) {
+      throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${fallback.error.message}`)
+    }
+    return withExtendedDefaults((fallback.data ?? []) as VehicleRow[])
+  }
+
+  throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${primary.error.message}`)
 }
 
 /** Collector scope: every active vehicle across all owners, no user filter. */
 export async function listAllVehicleRows(): Promise<VehicleRow[]> {
   const supabase = getSupabaseAdmin()
-  const { data, error } = await supabase
+  const primary = await supabase
     .from('vehicles')
     .select(VEHICLE_COLUMNS_EXTENDED)
     .eq('is_active', true)
     .order('created_at', { ascending: true })
-  if (error) {
-    throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${error.message}`)
+  if (!primary.error) {
+    return withExtendedDefaults((primary.data ?? []) as VehicleRow[])
   }
-  return (data ?? []) as VehicleRow[]
+
+  if (missingVehicleColumn(primary.error.message)) {
+    const fallback = await supabase
+      .from('vehicles')
+      .select(VEHICLE_COLUMNS_LEGACY)
+      .eq('is_active', true)
+      .order('created_at', { ascending: true })
+    if (fallback.error) {
+      throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${fallback.error.message}`)
+    }
+    return withExtendedDefaults((fallback.data ?? []) as VehicleRow[])
+  }
+
+  throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${primary.error.message}`)
 }
 
 export async function resolveVehicle(ownerId: string, requestedId?: string | null): Promise<VehicleRow | null> {

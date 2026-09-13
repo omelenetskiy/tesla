@@ -50,26 +50,32 @@ export function buildFleetClient(ownerId: string, vehicleRowId?: string, config:
 export async function syncFleetVehicles(ownerId: string, client: FleetClient): Promise<{ count: number; vins: string[] }> {
   const list = await client.getVehicles()
   const supabase = getSupabaseAdmin()
-  const { data: existing, error: readError } = await supabase.from('vehicles').select('id, vin, vehicle_tag_id, vehicle_id, provider_vehicle_id').eq('owner_id', ownerId)
-  if (readError) throw new TeslaApiError('unknown', `Could not read existing vehicles: ${readError.message}`)
-  const rows = (existing ?? []) as Array<{ id: string; vin: string | null; vehicle_tag_id: string | null; vehicle_id: string | null; provider_vehicle_id: string | null }>
+
+  let rows: Array<{ id: string; vin: string | null; vehicle_tag_id: string | null; vehicle_id: string | null; provider_vehicle_id: string | null }> = []
+  const primary = await supabase.from('vehicles').select('id, vin, vehicle_tag_id, vehicle_id, provider_vehicle_id').eq('owner_id', ownerId)
+  if (!primary.error) {
+    rows = (primary.data ?? []) as Array<{ id: string; vin: string | null; vehicle_tag_id: string | null; vehicle_id: string | null; provider_vehicle_id: string | null }>
+  } else if (/vehicles\.vehicle_tag_id does not exist|column .* does not exist/i.test(primary.error.message ?? '')) {
+    const fallback = await supabase.from('vehicles').select('id, vin, vehicle_id, provider_vehicle_id').eq('owner_id', ownerId)
+    if (fallback.error) throw new TeslaApiError('unknown', `Could not read existing vehicles: ${fallback.error.message}`)
+    rows = (fallback.data ?? []).map((row) => ({ ...row, vehicle_tag_id: null })) as Array<{ id: string; vin: string | null; vehicle_tag_id: string | null; vehicle_id: string | null; provider_vehicle_id: string | null }>
+  } else {
+    throw new TeslaApiError('unknown', `Could not read existing vehicles: ${primary.error.message}`)
+  }
 
   const vins: string[] = []
   for (const entry of list) {
     const vin = entry.vin ?? null
     const shortId = entry.id_s ?? (entry.id !== undefined ? String(entry.id) : null)
     if (!vin && !shortId) continue
+
     const match =
       (vin ? rows.find((row) => row.vin && row.vin === vin) : undefined) ??
       (shortId ? rows.find((row) => row.vehicle_tag_id === shortId || row.provider_vehicle_id === shortId) : undefined) ??
-      // An older row for this account may hold the *long* streaming id in
-      // provider_vehicle_id - that was plan defect E2. Without this key the sync would add a
-      // second row for the same car, and resolveVehicle would keep handing the dashboard the
-      // old one, which has no usable identifier at all.
       (entry.vehicle_id !== undefined ? rows.find((row) => row.vehicle_id && String(row.vehicle_id) === String(entry.vehicle_id)) : undefined)
+
     const payload = {
       owner_id: ownerId,
-      // `provider_vehicle_id` is the historical natural key; the VIN is the stable one for Fleet.
       provider_vehicle_id: vin ?? shortId ?? '',
       vin,
       vehicle_tag_id: shortId,
@@ -77,13 +83,28 @@ export async function syncFleetVehicles(ownerId: string, client: FleetClient): P
       display_name: entry.display_name ?? 'Tesla',
       is_active: true,
     }
+
     if (match) {
       const { error } = await supabase.from('vehicles').update(payload).eq('id', match.id)
       if (error) throw new TeslaApiError('unknown', `Could not update the vehicle row: ${error.message}`)
     } else {
       const { error } = await supabase.from('vehicles').insert(payload)
-      if (error) throw new TeslaApiError('unknown', `Could not store the vehicle: ${error.message} - is migration 004 applied?`)
+      if (error && /vehicles\.vehicle_tag_id does not exist|column .* does not exist/i.test(error.message ?? '')) {
+        const legacyPayload = {
+          owner_id: ownerId,
+          provider_vehicle_id: vin ?? shortId ?? '',
+          vin,
+          vehicle_id: entry.vehicle_id !== undefined ? String(entry.vehicle_id) : null,
+          display_name: entry.display_name ?? 'Tesla',
+          is_active: true,
+        }
+        const retry = await supabase.from('vehicles').insert(legacyPayload)
+        if (retry.error) throw new TeslaApiError('unknown', `Could not store the vehicle: ${retry.error.message}`)
+      } else if (error) {
+        throw new TeslaApiError('unknown', `Could not store the vehicle: ${error.message}`)
+      }
     }
+
     if (vin) vins.push(vin)
   }
 
@@ -105,11 +126,6 @@ function snapshotFrom(status: VehicleStatus | null, reason: string | null, error
 
 /**
  * The row the dashboard should read, among all active rows for the owner.
- *
- * `resolveVehicle` returns the oldest row, which on an account that was once connected over
- * the Fleet API is the one holding a long streaming id and no VIN - no usable
- * `{vehicle_tag}` at all. Picking "a row we can actually address" fixes the 404 without
- * deleting anyone's history.
  */
 export function pickFleetRow(rows: VehicleRow[], requestedId?: string | null): VehicleRow | null {
   const usable = rows.filter((row) => fleetVehicleTag(row) !== null)
@@ -130,19 +146,19 @@ async function cachedSnapshot(row: VehicleRow, reason: string, error: unknown | 
 
 /**
  * One live read. Nothing here wakes the car.
- *
- * `GET /api/1/vehicles/{tag}` is answered by Tesla's cloud from cached metadata, so asking
- * it whether the car is awake costs the vehicle nothing. `vehicle_data` is a live call to
- * the car and *does* wake it, so it is issued only when the state says the radio is up.
- * Whatever we get is stored, and until the next wake the dashboard shows that stored row -
- * which is the whole "показывай до следующего пробуждения" requirement, satisfied without
- * a single scheduled request.
  */
 export async function readFleetStatus(row: VehicleRow, client: FleetClient): Promise<FleetStatusResult> {
   const tag = fleetVehicleTag(row)
   if (!tag) {
     return {
-      snapshot: await cachedSnapshot(row, 'no_vehicle_tag', new TeslaApiError('not_found', 'No usable vehicle identifier is stored for this row yet - the account vehicle list has to be fetched.', { endpoint: '/api/1/vehicles/{vehicle_tag}', method: 'GET' })),
+      snapshot: await cachedSnapshot(
+        row,
+        'no_vehicle_tag',
+        new TeslaApiError('not_found', 'No usable vehicle identifier is stored for this row yet - the account vehicle list has to be fetched.', {
+          endpoint: '/api/1/vehicles/{vehicle_tag}',
+          method: 'GET',
+        }),
+      ),
       wakeHint: null,
       authState: null,
     }
@@ -158,8 +174,6 @@ export async function readFleetStatus(row: VehicleRow, client: FleetClient): Pro
     try {
       data = await client.getVehicleData(tag, { vehicleId: row.id })
     } catch (error) {
-      // The summary said awake and the car did not answer the rollup (408). Show the
-      // summary rather than throwing the read away, and do not retry - a retry is a wake.
       if (!FleetClient.isVehicleUnavailable(error)) throw error
     }
 
@@ -172,6 +186,7 @@ export async function readFleetStatus(row: VehicleRow, client: FleetClient): Pro
         // A failed write must not hide data we just received from the car.
       }
     }
+
     return {
       snapshot: snapshotFrom(status, data ? 'first_collect' : 'telemetry_unavailable', null, collectedAt),
       wakeHint: null,
