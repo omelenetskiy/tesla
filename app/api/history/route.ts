@@ -15,25 +15,39 @@ const RANGES = ['24h', '7d', '30d', '90d', 'all'] as const
  * to say so instead of drawing a smooth line it has no data for.
  */
 export async function GET(request: Request) {
-  const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
-
   const url = new URL(request.url)
   const requested = url.searchParams.get('range') as HistoryRange | null
   const range: HistoryRange = requested && (RANGES as readonly string[]).includes(requested) ? requested : '30d'
 
-  const row = await resolveVehicle(user.id, url.searchParams.get('vehicle'))
-  if (!row) {
-    return NextResponse.json({ range, origin: 'empty', historyTablesMissing: true, snapshotCount: 0, history: { battery: [], trips: [], charging: [] } })
+  try {
+    const user = await getAuthenticatedUser()
+    if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
+
+    const row = await resolveVehicle(user.id, url.searchParams.get('vehicle'))
+    if (!row) {
+      return NextResponse.json({ range, origin: 'empty', historyTablesMissing: true, snapshotCount: 0, history: { battery: [], trips: [], charging: [] } })
+    }
+
+    const bundle = await readHistory(row.id, range)
+
+    return NextResponse.json({
+      range,
+      origin: bundle.origin,
+      historyTablesMissing: bundle.historyTablesMissing,
+      snapshotCount: bundle.snapshotCount,
+      history: { battery: bundle.battery, trips: bundle.trips, charging: bundle.charging },
+    })
+  } catch (error) {
+    return NextResponse.json(
+      {
+        range,
+        origin: 'empty',
+        historyTablesMissing: true,
+        snapshotCount: 0,
+        history: { battery: [], trips: [], charging: [] },
+        message: error instanceof Error ? error.message : 'History is temporarily unavailable.',
+      },
+      { status: 503 },
+    )
   }
-
-  const bundle = await readHistory(row.id, range)
-
-  return NextResponse.json({
-    range,
-    origin: bundle.origin,
-    historyTablesMissing: bundle.historyTablesMissing,
-    snapshotCount: bundle.snapshotCount,
-    history: { battery: bundle.battery, trips: bundle.trips, charging: bundle.charging },
-  })
 }
