@@ -54,6 +54,7 @@ function FleetBanner() {
 export default function TeslaLoginPage() {
   const router = useRouter()
   const [fleet, setFleet] = React.useState<FleetStatus | null>(null)
+  const [statusError, setStatusError] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [disconnecting, setDisconnecting] = React.useState(false)
   const [signingOutEverywhere, setSigningOutEverywhere] = React.useState(false)
@@ -61,15 +62,25 @@ export default function TeslaLoginPage() {
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
-      const response = await fetch('/api/settings', { cache: 'no-store' })
-      if (!response.ok) {
-        if (!cancelled) setLoading(false)
-        return
-      }
-      const payload = (await response.json()) as { fleet?: FleetStatus }
-      if (!cancelled) {
-        setFleet(payload.fleet ?? null)
-        setLoading(false)
+      try {
+        const response = await fetch('/api/settings', { cache: 'no-store' })
+        const payload = (await response.json().catch(() => null)) as { fleet?: FleetStatus; message?: string } | null
+        if (cancelled) return
+        setFleet(payload?.fleet ?? null)
+        if (!response.ok) {
+          const detail = payload?.fleet && !payload.fleet.configured ? payload.fleet.detail : payload?.message
+          setStatusError(detail ?? `Fleet status request failed (${response.status})`)
+        } else {
+          setStatusError(null)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setStatusError(error instanceof Error ? error.message : 'Fleet status request failed.')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     })()
     return () => {
@@ -82,9 +93,14 @@ export default function TeslaLoginPage() {
     try {
       await fetch('/api/fleet/credentials', { method: 'DELETE' })
       const response = await fetch('/api/settings', { cache: 'no-store' })
-      if (!response.ok) return
-      const payload = (await response.json()) as { fleet?: FleetStatus }
-      setFleet(payload.fleet ?? null)
+      const payload = (await response.json().catch(() => null)) as { fleet?: FleetStatus; message?: string } | null
+      if (!response.ok) {
+        const detail = payload?.fleet && !payload.fleet.configured ? payload.fleet.detail : payload?.message
+        setStatusError(detail ?? `Fleet status request failed (${response.status})`)
+        return
+      }
+      setStatusError(null)
+      setFleet(payload?.fleet ?? null)
     } finally {
       setDisconnecting(false)
     }
@@ -121,6 +137,8 @@ export default function TeslaLoginPage() {
 
         {loading ? (
           <p className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-[12.5px] text-ink-secondary">Checking connection status…</p>
+        ) : statusError ? (
+          <p className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-[12.5px] text-danger">{statusError}</p>
         ) : !fleet ? (
           <p className="rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-[12.5px] text-danger">Could not load Fleet status.</p>
         ) : !fleet.configured ? (
