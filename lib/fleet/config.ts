@@ -4,10 +4,10 @@
  * Every host, path and scope string here is quoted verbatim in
  * `docs/TESLA_FLEET_MIGRATION_PLAN.md` §4a. Nothing in this file is inferred, and anything
  * that is not pinned there (userinfo, telemetry config, commands) deliberately does not
- * appear here at all — an unpinned path in a config file is how the Owner API build ended
+ * appear here at all — an unpinned path in a config file is how the legacy build ended
  * up requesting `/oauth2/v3/oauth2/v3/token` for two weeks.
  *
- * Two deliberate breaks from the Owner API layer:
+ * Two deliberate breaks from the legacy layer:
  *  - the token host is `fleet-auth.prd.vn.cloud.tesla.com`, **not** `auth.tesla.com`. The
  *    docs make that mandatory: "calls to `/token` must use the
  *    fleet-auth.prd.vn.cloud.tesla.com domain as these calls can come from application
@@ -92,7 +92,7 @@ export type FleetConfig = {
   /**
    * Set when `redirect_uri` does not point at this app's real callback route.
    *
-   * Not a nitpick: the Owner API build left a `TESLA_FLEET_REDIRECT_URI` aimed at
+   * Not a nitpick: the previous build left a `TESLA_FLEET_REDIRECT_URI` aimed at
    * `/api/tesla/auth/callback`, so Tesla authorized the user, redirected to a path that no
    * longer exists, and the one-time code was consumed by a 404 — a login that looks like it
    * worked right up until it silently didn't. The connect route refuses to start when this
@@ -131,7 +131,7 @@ export function createFleetConfig(env: FleetEnv): FleetConfig {
     )
   }
 
-  // The callback route is fixed in this codebase, so a stale URI from the Owner API build
+  // The callback route is fixed in this codebase, so a stale URI from the previous build
   // is a silent dead end: Tesla authorizes the user, redirects to a path that does not
   // exist, and the one-time code is consumed by a 404. Detected here so the connect route
   // can refuse instead of spending the code.

@@ -47,7 +47,7 @@ function randomUrlValue(bytes: number) {
 
 /**
  * `client_id=ownerapi` is the documented native-client identifier and is what makes
- * the Owner API accept the resulting bearer token. `redirect_uri` is Tesla's own
+ * the Fleet API endpoints accept the resulting bearer token. `redirect_uri` is Tesla's own
  * void callback: the authorization code is echoed there, never to our origin, which
  * is why `/connect` captures the callback URL and finishes the exchange server-side.
  */
@@ -130,12 +130,12 @@ export function isAccessTokenValid(accessToken: string, skewMs = teslaConfig.exp
 /**
  * Token exchange over HTTP/2 + TLS 1.3.
  *
- * This is the most likely reason the Owner API answered 403 for a token that
+ * This is the most likely reason the Fleet API answered 403 for a token that
  * `userinfo` accepted. TeslaMate fixed the same class of failure in v4.0.1 by
  * pinning only its auth pool to `[:http1, :http2]` + `tlsv1.3` (PR #5406, "fix:
  * enable HTTP/2 and set TLS to 1.3 for TESLA_AUTH_HOST") and kept using the Owner
  * API for individual accounts — its `TESLA_API_HOST` pool carries no such
- * requirement, and its docs still state "Individual users: the Owner API is
+ * requirement, and its docs still state "Individual users: the legacy API is
  * currently still accessible".
  *
  * Node's global fetch is undici and cannot negotiate HTTP/2, so the auth host gets a
@@ -260,7 +260,7 @@ export async function refreshTokens(refreshToken: string, authHost?: string | nu
 
 /**
  * Read-only credential liveness check (§41 "✓ Access token valid").
- * `userinfo` answers for a live session even when the Owner API itself is gated,
+ * `userinfo` answers for a live session even when the Fleet API itself is gated,
  * which is exactly the distinction the debug console has to show.
  */
 export async function verifyAccessToken(accessToken: string, authBase: string = teslaConfig.authBaseUrl): Promise<{ ok: boolean; status: number; subject?: string | null }> {

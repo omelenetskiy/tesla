@@ -5,7 +5,7 @@
 -- 004 added `polling_profile text not null default 'default'`. Every existing row —
 -- including vehicles deliberately set to `collection_mode = 'passive'` — therefore
 -- received 'default' on creation, and the resolver preferred that column. Result:
--- applying 004 turned a passive vehicle into one that issues live Owner API probes,
+-- applying 004 turned a passive vehicle into one that issues live legacy API probes,
 -- which is the opposite of the promise in AGENTS.md §3.3 and README.
 --
 -- The column is now nullable with no default, so "the operator never chose a

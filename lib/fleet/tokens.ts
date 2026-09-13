@@ -7,7 +7,7 @@ import { fleetConfig, type FleetConfig } from './config'
 /**
  * Fleet credential lifecycle, keyed by owner.
  *
- * Inherited from the Owner API layer because both are load-bearing and both were learned
+ * Inherited from the previous layer because both are load-bearing and both were learned
  * the expensive way:
  *  - tokens are encrypted at rest with the existing AES-256-GCM helper;
  *  - a token value never reaches a route handler's JSON body, a log line, or a URL;
@@ -144,7 +144,7 @@ export type FleetAuthDiagnostics = {
 /**
  * Local evidence only.
  *
- * The Owner API build verified a token by calling userinfo; that path is not in the pinned
+ * The previous build verified a token by calling userinfo; that path is not in the pinned
  * Fleet contract (§4b) and is deliberately not guessed here. Expiry, the stored scope list
  * and the audience-vs-region consistency are the three things that actually break, and all
  * three are readable without a request.

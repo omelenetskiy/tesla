@@ -1,7 +1,7 @@
 -- 008_fleet_request_types.sql
 -- Apply after 004 and 006.
 --
--- The Fleet path introduces two request kinds the Owner API never had: a vehicle command
+-- The Fleet path introduces two request kinds the legacy API never had: a vehicle command
 -- (POST /api/1/vehicles/{tag}/command/{name}) and a telemetry configuration write. Neither is
 -- in 004's CHECK list, and `recordRequest` swallows insert errors — so without this migration
 -- every command would vanish from the audit log silently, which is the same failure mode that
@@ -16,8 +16,8 @@ alter table public.api_request_logs add constraint api_request_logs_request_type
 ));
 
 -- VIN-keyed identity: the Fleet list writes the VIN into provider_vehicle_id, so the comment
--- that still describes it as an Owner API id has to change or the next reader will "fix" it.
-comment on column public.vehicles.provider_vehicle_id is 'Natural key from the provider: the VIN under Fleet, the short id under the retired Owner API.';
+-- that still describes it as a legacy short id has to change or the next reader will "fix" it.
+comment on column public.vehicles.provider_vehicle_id is 'Natural key from the provider: the VIN under Fleet, the short id under the retired legacy API.';
 comment on column public.vehicles.owner_api_id is 'Short id — valid as {vehicle_tag} alongside the VIN; never the long vehicle_id.';
 
 notify pgrst, 'reload schema';

@@ -11,7 +11,7 @@ import { createAccessTokenProvider, refreshCredential, type TeslaAuthState } fro
 
 /**
  * The Tesla service (§11's middle tier). Route handlers call these use cases; only
- * this module and `client.ts` know the Owner API exists. Nothing here returns token
+ * this module and `client.ts` know the Fleet API details. Nothing here returns token
  * material, and nothing here builds a user-facing string.
  */
 
@@ -222,7 +222,7 @@ export async function readVehicleStatus(input: {
   try {
     const shortId = ownerApiIdOf(row) ?? (await recoverOwnerApiId(client, row))
     if (!shortId) {
-      throw new TeslaApiError('not_found', 'Tesla has not given this app a short Owner API id for the vehicle, so no state endpoint can be addressed. Reconnect the vehicle to refresh its identifiers.', { endpoint: '/api/1/vehicles/:id', method: 'GET' })
+      throw new TeslaApiError('not_found', 'Tesla has not given this app a short vehicle id for Fleet state calls, so no state endpoint can be addressed. Reconnect the vehicle to refresh its identifiers.', { endpoint: '/api/1/vehicles/:id', method: 'GET' })
     }
     const { status, telemetryCollected } = await client.getVehicleStatus(shortId, { vehicleId: row.id })
     const collectedAt = new Date().toISOString()
@@ -357,7 +357,7 @@ export async function syncVehiclesFromList(ownerId: string, list: RawVehicleList
 }
 
 /**
- * Reachability probe for /debug/api §41 — does the Owner API answer at all?
+ * Reachability probe for diagnostics — does the Fleet API answer at all?
  * Bypasses the cache on purpose: a diagnostic that returns a memoised answer is
  * worse than no diagnostic.
  */

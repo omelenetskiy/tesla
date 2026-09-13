@@ -2,8 +2,8 @@
 --
 -- A Fleet token is scoped to the *owner*, not to a vehicle: one authorization grant covers
 -- every vehicle that owner shares with the app. vehicle_credentials was keyed by
--- vehicle_id because the Owner API worked per vehicle; keeping both keyed the same way
--- would let a stale per-vehicle Owner API row silently win over a live Fleet token, which
+-- vehicle_id because the legacy API worked per vehicle; keeping both keyed the same way
+-- would let a stale per-vehicle legacy API row silently win over a live Fleet token, which
 -- is a failure that cannot be diagnosed from the UI.
 create table if not exists public.fleet_credentials (
   owner_id uuid primary key references auth.users(id) on delete cascade,

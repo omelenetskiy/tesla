@@ -1,7 +1,7 @@
 import type { VehiclePresence, VehicleStatusSnapshot } from './models'
 
 /**
- * Legacy polling policy module kept for compatibility while Owner API code paths are
+ * Legacy polling policy module kept for compatibility while old API code paths are
  * still present in `lib/tesla/service.ts` and debug tooling.
  */
 export interface VehicleDataProvider {

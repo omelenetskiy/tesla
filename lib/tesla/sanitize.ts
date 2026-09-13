@@ -20,7 +20,7 @@ const SECRET_HEADERS = new Set([
 
 /**
  * Body/query keys carrying credential material. `tokens` and `backseat_token`
- * appear in the Owner API vehicle list itself, so response bodies are scrubbed too.
+ * appear in the Fleet vehicle list itself, so response bodies are scrubbed too.
  */
 const SECRET_KEY_PATTERN = /(access_token|refresh_token|id_token|auth_token|authcode|authorization|backseat_token|^tokens$|client_secret|secret|password|credential|passcode|code_verifier|code_challenge|pkce|session_token|api_key|private_key|otp)/i
 

@@ -1,5 +1,5 @@
 /**
- * The one rule that decides which identifier goes into an Owner API path.
+ * The one rule that decides which identifier goes into a Fleet path.
  *
  * Plan E2/E3 named this as the single most damaging confusion in the old
  * implementation, and it survived the rewrite in `ownerApiIdOf`: a row whose short id
@@ -18,7 +18,7 @@ export type VehicleIdColumns = {
   vehicle_id?: string | null
 }
 
-/** Owner API short ids are at most 12 digits; the streaming `vehicle_id` is 16. */
+/** Fleet short ids are at most 12 digits; the streaming `vehicle_id` is 16. */
 const MAX_SHORT_ID_LENGTH = 12
 
 export function resolveOwnerApiId(row: VehicleIdColumns): string | null {

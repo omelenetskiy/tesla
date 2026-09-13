@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
  * GET /api/vehicle — the dashboard's single read.
  *
  * Fleet first: when the account holds a Fleet token, this route *is* the startup data path,
- * and it creates the vehicle row on the way through. The Owner API branch below stays only
+ * and it creates the vehicle row on the way through. The legacy branch below stays only
  * until P6 removes it, so a deployment that has not re-authorized yet still shows something.
  */
 export async function GET(request: Request) {

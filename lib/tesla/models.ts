@@ -25,7 +25,7 @@ export type ShiftState = 'D' | 'R' | 'N' | 'P' | 'unknown'
 export type TripPhase = 'outbound' | 'return_home' | 'unknown'
 
 /**
- * Owner API `/api/1/vehicles` distinguishes three identifiers and they are not
+ * Fleet `/api/1/vehicles` distinguishes three identifiers and they are not
  * interchangeable. `ownerApiId` is the short id used by every state endpoint
  * (`/api/1/vehicles/{id}/...`); `vehicleId` is the long id used for cross-endpoint
  * identity such as streaming. Storing only one of them is what produced plan E2.
@@ -33,7 +33,7 @@ export type TripPhase = 'outbound' | 'return_home' | 'unknown'
 export type VehicleIdentity = {
   /** Internal uuid (application database primary key). */
   databaseId: string
-  /** Short Owner API id — used as `{id}` in path segments. */
+  /** Short Fleet tag id — used as `{id}` in path segments. */
   ownerApiId: string
   /** Long `vehicle_id` — used for streaming/cross-endpoint identity only. */
   vehicleId: string | null

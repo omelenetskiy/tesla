@@ -118,7 +118,7 @@ export default function BatteryPage() {
             </p>
           ) : (
             <p className="mt-1.5 text-[12.5px] leading-5 text-ink-secondary">
-              {snapshots.length} snapshots collected. Rated-capacity degradation still requires the Owner API to report full-charge capacity; until it does, this panel stays
+              {snapshots.length} snapshots collected. Rated-capacity degradation still requires the Fleet API to report full-charge capacity; until it does, this panel stays
               empty rather than estimating.
             </p>
           )}

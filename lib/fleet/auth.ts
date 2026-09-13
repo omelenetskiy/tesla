@@ -1,7 +1,7 @@
 /**
  * Fleet API third-party authorization.
  *
- * This replaces the Owner API's PKCE flow rather than extending it. The pinned contract
+ * This replaces the previous PKCE flow rather than extending it. The pinned contract
  * (`docs/TESLA_FLEET_MIGRATION_PLAN.md` §4a) has no `code_challenge` anywhere — the
  * authorize parameter list carries a `nonce` instead — and the token exchange is
  * `application/x-www-form-urlencoded` with a `client_secret` and a regional `audience`.

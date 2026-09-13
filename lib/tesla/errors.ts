@@ -1,7 +1,7 @@
 import { teslaConfig } from './config'
 
 /**
- * Typed failure taxonomy for the Owner API (§20).
+ * Typed failure taxonomy for the Fleet API (§20).
  * Callers branch on `kind`, never on a message substring — the previous
  * `message.includes('credentials were rejected')` control flow is what let a
  * genuine 403 authorization failure masquerade as an expiring token.

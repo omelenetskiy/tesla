@@ -158,7 +158,7 @@ export type AuthDiagnostics = {
 
 /**
  * Composes §45's state machine from local evidence plus a read-only userinfo call.
- * `API_UNAVAILABLE` is deliberately distinct from `AUTH_FAILED`: the Owner API gate
+ * `API_UNAVAILABLE` is deliberately distinct from `AUTH_FAILED`: the Fleet API gate
  * we measured is the former while the credential itself is fine.
  */
 export async function diagnoseAuth(vehicleId: string, ownerId?: string): Promise<AuthDiagnostics> {

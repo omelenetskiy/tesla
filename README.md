@@ -12,7 +12,7 @@ DriveScope is now Fleet-first:
 ## What changed
 
 - Removed legacy polling entry points (`/api/collect`, Netlify collect function)
-- Removed Owner API compatibility shim files
+- Removed legacy API compatibility shim files
 - Enforced Fleet authorization gate for app pages
 - Added static `.well-known` flow for Tesla virtual key hosting
 

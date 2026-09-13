@@ -2,7 +2,7 @@ import { anyPartOpen } from './models'
 import type { VehicleStatus, VehicleStatusSnapshot } from './models'
 
 /**
- * Vehicle alerts, derived from what the Owner API actually reports about the CAR.
+ * Vehicle alerts, derived from what the Fleet API actually reports about the car.
  *
  * Deliberately vehicle-only: integration problems (a 403, a failed request) belong to
  * the API console and the Alerts page has no business mixing them in, because a

@@ -19,7 +19,7 @@ const MILES_TO_KM = 1.609344
  *
  * The previous code asserted three different things about the same field: the raw
  * type comment said km/h, the normaliser comment said "documented in mph; no
- * conversion needed", and the UI labelled the result km. Owner API reports
+ * conversion needed", and the UI labelled the result km. Fleet API reports
  * `battery_range`/`est_battery_range`/`ideal_battery_range`/`odometer` in miles and
  * temperatures in °C, while `speed` follows the vehicle's own unit setting — so
  * `speed` is passed through and every distance field is converted exactly once.
@@ -289,7 +289,7 @@ export type RawMergedVehicle = RawVehicleListItem & {
 /**
  * Connectivity vocabulary.
  *
- * The Owner API has answered the vehicle `state` field with more than one word for the
+ * The Fleet API has answered the vehicle `state` field with more than one word for the
  * same thing: `online` on the vehicle endpoints, `active` on others. Comparing against
  * the single literal `"online"` therefore classified a fully awake car as asleep, which
  * suppressed the telemetry call forever — the symptom being a dashboard with no data
@@ -544,7 +544,7 @@ function completenessOf(status: Omit<VehicleStatus, 'completeness'>): number {
 }
 
 /**
- * The single entry point from raw Owner API → domain model. Takes the merged list
+ * The single entry point from raw Fleet API -> domain model. Takes the merged list
  * entry + `vehicle_data` rollup, because §19 prefers one rollup call over several
  * deprecated `data_request/*` calls.
  */

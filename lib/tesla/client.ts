@@ -29,7 +29,7 @@ export type TeslaClientDeps = {
   /** Injectable so the polling layer's TTL cache can be tested without timers. */
   cacheTtlMs?: number
   /**
-   * Points the same client at another Owner API host. Used only by /debug/api's
+   * Points the same client at another Fleet API host. Used only by diagnostics flows
    * environment switch, to reproduce regional-endpoint problems (§41) — for example
    * `owner-api.vn.cloud.tesla.cn` for a China account.
    */
@@ -62,7 +62,7 @@ function sleepWithCap(ms: number) {
 }
 
 /**
- * The only module allowed to speak to the Tesla Owner API (plan §5, AGENTS.md §3.1).
+ * The only module allowed to speak to the Tesla Fleet API (plan §5, AGENTS.md §3.1).
  *
  * Responsibilities, in order of the failure modes that motivated them:
  *   - one rollup `vehicle_data` call instead of several deprecated section calls (§19)
@@ -146,7 +146,7 @@ export class TeslaClient {
   }
 
   /**
-   * Executes one Owner API call with the §20 policy.
+   * Executes one Fleet API call with the §20 policy.
    * Returns the unwrapped `response` payload (the envelope is always `{response}`
    * on success and `{error,error_description}` on failure).
    */
@@ -199,7 +199,7 @@ export class TeslaClient {
       const body = options.body === undefined ? undefined : typeof options.body === 'string' ? options.body : JSON.stringify(options.body)
       const headers: Record<string, string> = {
         Accept: 'application/json',
-        // Only when there is a body. TeslaMate's Owner API client sends nothing but
+        // Only when there is a body. TeslaMate's legacy client sends nothing but
         // `user-agent` and `Authorization`, and the June-2026 403 wave was diagnosed
         // in its tracker as Tesla rejecting clients whose request shape it does not
         // like — a `Content-Type` on a bodyless GET is exactly such an oddity.
@@ -331,13 +331,13 @@ export class TeslaClient {
     retryAfterMs?: number,
   ) {
     const detail = redactJsonText(rawText)?.slice(0, 400) ?? ''
-    // The Owner API sunset signature: a 403 whose body points at the Fleet API
+    // The legacy API sunset signature: a 403 whose body points at the Fleet API
     // docs. Named explicitly so /debug/api can report it as a platform gate
     // instead of prompting the user to re-create working credentials.
     if (kind === 'forbidden' && /fleet-api|fleetapi|developer\.tesla\.com/i.test(detail)) {
       return new TeslaApiError(
         'forbidden',
-        'Tesla has closed Owner API access for this token (403). The response references the Fleet API — this is a platform limitation, not a request error.',
+        'Tesla has closed legacy API access for this token (403). The response references the Fleet API - this is a platform limitation, not a request error.',
         { status, endpoint, method, attempts: attempt, responseBody: detail },
       )
     }
@@ -375,7 +375,7 @@ export class TeslaClient {
       const record = payload as Record<string, unknown>
       if ('response' in record) {
         if (record.response === null || record.response === undefined) {
-          // `{"response":null}` is how the Owner API answers a vehicle that is
+          // `{"response":null}` is how the Fleet API answers a vehicle that is
           // reachable but has no data for this section — not a transport failure.
           throw new TeslaApiError('not_found', 'Tesla returned an empty response for this section', { status, endpoint, method, attempts: attempt })
         }

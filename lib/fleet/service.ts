@@ -13,7 +13,7 @@ import type { VehicleStatus, VehicleStatusSnapshot } from '../tesla/models'
 /**
  * The Fleet read/write path.
  *
- * Two things differ from the Owner API service it replaces, and both are deliberate:
+ * Two things differ from the legacy service it replaces, and both are deliberate:
  * there is no cache-first ladder (no polling means "the last read is stale" by
  * definition, so pretending otherwise would be a lie in the UI), and a vehicle row is
  * created by *this* sync rather than by a connect form that pasted identifiers.
@@ -43,7 +43,7 @@ export function buildFleetClient(ownerId: string, vehicleRowId?: string, config:
  * Upsert every vehicle the account exposes.
  *
  * Matching is by VIN first, then by the short id a pre-Fleet row may hold. Without the
- * second key, an account that was once connected over the Owner API would gain a duplicate
+ * second key, an account that was once connected over the legacy API would gain a duplicate
  * vehicle row on the first Fleet sync — and the selector, the history and the settings row
  * would then disagree about which car is "the" car.
  */
@@ -107,7 +107,7 @@ function snapshotFrom(status: VehicleStatus | null, reason: string | null, error
  * The row the dashboard should read, among all active rows for the owner.
  *
  * `resolveVehicle` returns the oldest row, which on an account that was once connected over
- * the Owner API is the legacy one holding a long streaming id and no VIN — no usable
+ * the legacy API is the one holding a long streaming id and no VIN — no usable
  * `{vehicle_tag}` at all. Picking "a row we can actually address" fixes the 404 without
  * deleting anyone's history.
  */

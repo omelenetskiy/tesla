@@ -277,7 +277,7 @@ const vehiclesAnswer = { response: { count: 1, response: [{ id: 123, id_s: '123'
   eq('403 does not attempt a refresh', refreshes, 0)
   eq('403 is not retried', calls.length, 1)
   check('403 surfaces as a forbidden error', caught instanceof TeslaApiError && caught.kind === 'forbidden', String(caught))
-  check('the Fleet-API gate is named in the message', caught instanceof TeslaApiError && /Owner API|Fleet/i.test(caught.message), caught instanceof TeslaApiError ? caught.message : '')
+  check('the Fleet-API gate is named in the message', caught instanceof TeslaApiError && /legacy API|Fleet/i.test(caught.message), caught instanceof TeslaApiError ? caught.message : '')
 }
 
 // 5xx retries are bounded; a vehicle_data rollup is preferred over data_request.
@@ -394,7 +394,7 @@ const vehiclesAnswer = { response: { count: 1, response: [{ id: 123, id_s: '123'
   check('no command scope is requested', !(authorize.searchParams.get('scope') ?? '').includes('vehicle_cmds'), authorize.searchParams.get('scope') ?? '')
 }
 
-// ── Owner API request shape ─────────────────────────────────────────────────
+// ── Legacy API request shape ────────────────────────────────────────────────
 // TeslaMate sends only `user-agent` and `Authorization` on reads; a Content-Type on a
 // bodyless GET is a fingerprintable oddity, so it must appear only with a body.
 {
@@ -415,7 +415,7 @@ const vehiclesAnswer = { response: { count: 1, response: [{ id: 123, id_s: '123'
   check('the User-Agent is not a browser string', Boolean(get?.headers['User-Agent']) && !/Mozilla|Chrome|Safari/.test(get?.headers['User-Agent'] ?? ''), String(get?.headers['User-Agent']))
 }
 
-// ── E2: which identifier may appear in an Owner API path ────────────────────
+// ── E2: which identifier may appear in a legacy API path ────────────────────
 // The long 16-digit `vehicle_id` is a streaming identity. The previous resolver fell
 // through to it whenever the short id was missing, so every state request went to
 // `/api/1/vehicles/3744651726645272` and failed — indistinguishable from a dead token.

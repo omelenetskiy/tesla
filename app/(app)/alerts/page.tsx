@@ -55,7 +55,7 @@ export default function AlertsPage() {
               <div className="min-w-0">
                 <p className="text-[14px] font-medium text-ink">Nothing reported</p>
                 <p className="mt-1 max-w-[520px] text-[12.5px] leading-5 text-ink-secondary">
-                  No conditions are flagged in the current snapshot. This is not a full vehicle diagnosis — the Owner API exposes no fault codes, so only reported
+                  No conditions are flagged in the current snapshot. This is not a full vehicle diagnosis — the Fleet API exposes no fault codes, so only reported
                   conditions can appear here.
                 </p>
               </div>

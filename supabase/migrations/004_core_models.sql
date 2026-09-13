@@ -2,7 +2,7 @@
 -- Apply AFTER 001, 002 and 003. Order matters: this file extends tables that 001/002 create.
 -- Plan §6: identifier split (E2), typed snapshot columns (F8), ActivityEvent, RequestLog (§23).
 
--- ── Vehicle identity: the short Owner API id vs the long cross-endpoint id ──
+-- ── Vehicle identity: the short Fleet tag id vs the long cross-endpoint id ──
 -- Requirement §44: `{id}` addresses state/command endpoints, `vehicle_id` addresses
 -- streaming. The legacy single column stored whichever one the connect path happened
 -- to write, which is how the live row ended up holding a 16-digit vehicle_id in a
@@ -16,7 +16,7 @@ alter table public.vehicles
   add column if not exists last_seen_at timestamptz,
   add column if not exists last_collected_at timestamptz;
 
-comment on column public.vehicles.owner_api_id is 'Short Owner API id — the {id} path segment for /api/1/vehicles/{id}/...';
+comment on column public.vehicles.owner_api_id is 'Short fleet tag id — the {id} path segment for /api/1/vehicles/{id}/...';
 comment on column public.vehicles.vehicle_id is 'Long vehicle_id — streaming and cross-endpoint identity only. Never used as a path id.';
 
 -- Backfill from the legacy column when it clearly holds a short id (<= 12 digits).

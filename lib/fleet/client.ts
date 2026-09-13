@@ -6,12 +6,12 @@ import type { FleetConfig } from './config'
 /**
  * The Fleet API HTTP client.
  *
- * Deliberately smaller than the Owner API client it replaces. There is no cache and no
+ * Deliberately smaller than the legacy client it replaces. There is no cache and no
  * in-flight deduplication, because there is no polling: every call here is either an
  * explicit user action or a single read at page load, and a memo in front of that would
  * only serve stale state and hide the fact that the car was never asked.
  *
- * The payload envelope is the same `{response: …}` shape the Owner API used, so the domain
+ * The payload envelope is the same `{response: …}` shape the legacy API used, so the domain
  * normalizers in `lib/tesla/normalize.ts` are reused rather than rewritten.
  */
 
@@ -257,7 +257,7 @@ export class FleetClient {
     const safe = assertUsableVehicleTag(tag)
     // 'wake_up' verbatim: `api_request_logs.request_type` has a CHECK list, and an
     // unrecognised value is rejected by the database, not by Tesla — which loses the audit
-    // row silently. Same discipline as the Owner API client.
+    // row silently. Same discipline as the previous client.
     return this.request(`/api/1/vehicles/${encodeURIComponent(safe)}/wake_up`, { method: 'POST', body: {}, requestType: 'wake_up', ...options })
   }
 
