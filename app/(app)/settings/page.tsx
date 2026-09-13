@@ -56,9 +56,17 @@ export default function SettingsPage() {
   const [loading, setLoading] = React.useState(true)
 
   const load = React.useCallback(async () => {
-    const response = await fetch('/api/settings', { cache: 'no-store' })
-    if (!response.ok) return null
-    return (await response.json()) as { fleet?: FleetStatus }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15_000)
+    try {
+      const response = await fetch('/api/settings', { cache: 'no-store', signal: controller.signal })
+      if (!response.ok) return null
+      return (await response.json()) as { fleet?: FleetStatus }
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timeout)
+    }
   }, [])
 
   const apply = React.useCallback((payload: Awaited<ReturnType<typeof load>>) => {
@@ -73,11 +81,13 @@ export default function SettingsPage() {
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
-      const payload = await load()
-      if (cancelled) return
-      apply(payload)
-      // Cleared even when the request failed, otherwise the skeleton never ends.
-      setLoading(false)
+      try {
+        const payload = await load()
+        if (cancelled) return
+        apply(payload)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     })()
     return () => {
       cancelled = true

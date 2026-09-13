@@ -19,29 +19,56 @@ export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
 
-  const supabase = getSupabaseAdmin()
-  const row = await resolveVehicle(user.id, new URL(request.url).searchParams.get('vehicle'))
-
-  let fleet: Record<string, unknown>
   try {
-    const config = fleetConfig()
-    fleet = {
-      configured: true,
-      region: config.region,
-      redirectUri: config.redirectUri,
-      revokeUrl: consentRevokeUrl(config.clientId, config.redirectUri.replace(/\/api\/fleet\/callback$/, '/tesla-login')),
-      auth: await diagnoseFleetAuth(user.id),
-    }
-  } catch (error) {
-    fleet = {
-      configured: false,
-      reason: error instanceof FleetConfigError ? 'not-configured' : 'config-error',
-      detail: error instanceof Error ? error.message : 'Unknown configuration error',
-    }
-  }
+    const supabase = getSupabaseAdmin()
+    const row = await resolveVehicle(user.id, new URL(request.url).searchParams.get('vehicle'))
 
-  if (!row) {
-    const response = NextResponse.json({ connected: false, fleet })
+    let fleet: Record<string, unknown>
+    try {
+      const config = fleetConfig()
+      fleet = {
+        configured: true,
+        region: config.region,
+        redirectUri: config.redirectUri,
+        revokeUrl: consentRevokeUrl(config.clientId, config.redirectUri.replace(/\/api\/fleet\/callback$/, '/tesla-login')),
+        auth: await diagnoseFleetAuth(user.id),
+      }
+    } catch (error) {
+      fleet = {
+        configured: false,
+        reason: error instanceof FleetConfigError ? 'not-configured' : 'config-error',
+        detail: error instanceof Error ? error.message : 'Unknown configuration error',
+      }
+    }
+
+    if (!row) {
+      const response = NextResponse.json({ connected: false, fleet })
+      if (fleetCookieAllowed(fleet)) {
+        response.cookies.set('fleet_authorized', '1', {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+          path: '/',
+          maxAge: 60 * 60 * 24 * 90,
+        })
+      } else {
+        response.cookies.delete('fleet_authorized')
+      }
+      return response
+    }
+
+    const { data: settings } = await supabase
+      .from('user_settings')
+      .select('distance_unit, temperature_unit, time_zone, locale, location_history_enabled')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    const response = NextResponse.json({
+      connected: true,
+      fleet,
+      vehicle: { id: row.id, name: row.display_name, distanceUnit: row.distance_unit },
+      settings: settings ?? null,
+    })
     if (fleetCookieAllowed(fleet)) {
       response.cookies.set('fleet_authorized', '1', {
         httpOnly: true,
@@ -54,32 +81,19 @@ export async function GET(request: Request) {
       response.cookies.delete('fleet_authorized')
     }
     return response
+  } catch (error) {
+    return NextResponse.json(
+      {
+        connected: false,
+        fleet: {
+          configured: false,
+          reason: 'backend-error',
+          detail: error instanceof Error ? error.message : 'Settings backend is temporarily unavailable.',
+        },
+      },
+      { status: 503 },
+    )
   }
-
-  const { data: settings } = await supabase
-    .from('user_settings')
-    .select('distance_unit, temperature_unit, time_zone, locale, location_history_enabled')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const response = NextResponse.json({
-    connected: true,
-    fleet,
-    vehicle: { id: row.id, name: row.display_name, distanceUnit: row.distance_unit },
-    settings: settings ?? null,
-  })
-  if (fleetCookieAllowed(fleet)) {
-    response.cookies.set('fleet_authorized', '1', {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 90,
-    })
-  } else {
-    response.cookies.delete('fleet_authorized')
-  }
-  return response
 }
 
 /** PATCH /api/settings - display units only. */
