@@ -18,5 +18,7 @@ export async function DELETE() {
 
   const { error } = await getSupabaseAdmin().from('fleet_credentials').delete().eq('owner_id', user.id)
   if (error) return NextResponse.json({ message: `Could not delete the stored tokens: ${error.message}` }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  const response = NextResponse.json({ ok: true })
+  response.cookies.delete('fleet_authorized')
+  return response
 }

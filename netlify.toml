@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Keep Tesla virtual key path explicit in Netlify redirect rules.
+[[redirects]]
+  from = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+  to = "/.well-known/appspecific/com.tesla.3p.public-key.pem"
+  status = 200
+  force = true
+

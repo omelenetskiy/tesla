@@ -209,19 +209,44 @@ select:focus:not(:focus-visible),
 }
 
 /* ============================================================
+   VEHICLE STAGE
+   ============================================================ */
+
+/*
+ * The Vehicle card's art is a flat illustration: a mid-grey body that still reads on the
+ * dark surface, but glazing, wheels and sill that are the same near-black as the card, so
+ * the car loses its lower half into the background. A soft halo behind it lifts those edges
+ * without touching the art.
+ *
+ * A radial gradient rather than a drop shadow because the illustration has no ground plane —
+ * it is a cut-out, not a photograph — and a shadow underneath would invent a surface for it
+ * to sit on that the rest of the card does not have.
+ */
+.vehicle-stage {
+  min-height: 148px;
+}
+
+[data-theme='dark'] .vehicle-stage {
+  background: radial-gradient(58% 54% at 50% 46%, rgba(255, 255, 255, 0.09), transparent 72%);
+}
+
+/* ============================================================
    MAP MARKERS
    ============================================================ */
 
 /*
-   The map container must be sized here, not with Tailwind utilities.
+   The map container is sized here, in its own class, not with Tailwind utilities.
 
-   MapLibre's stylesheet declares `.maplibregl-map { position: relative }` outside of
-   any cascade layer, and unlayered rules beat layered ones whatever the specificity —
-   so `absolute inset-0` on the container was inert, the element had no height, and the
-   canvas (which MapLibre sizes from the container) collapsed. That is the whole of the
-   "canvas is only 44px tall" symptom, and it could not be fixed from the JSX.
+   MapLibre adds `.maplibregl-map` to the element it is given and declares
+   `position: relative` for it *outside of any cascade layer*. Unlayered rules beat
+   layered ones whatever the specificity, so `absolute inset-0` on that element was
+   inert: it had no height, and the canvas — which MapLibre sizes from the container —
+   collapsed. That was the whole of the "canvas is 44px tall" symptom and it could not
+   be fixed from JSX. `.ds-map` states the same properties unlayered, so it wins on its
+   own terms rather than by accident, and the parent owns the box size.
 */
-.maplibregl-map {
+.ds-map {
+  position: relative;
   width: 100%;
   height: 100%;
 }
@@ -232,23 +257,15 @@ select:focus:not(:focus-visible),
   place-items: center;
   width: 44px;
   height: 44px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.map-marker:disabled {
-  cursor: default;
+  pointer-events: none;
 }
 
 /* Direction is carried by the glyph: a navigation arrow rotated to the vehicle
    heading, filled with the state colour. */
 .map-marker-arrow {
   display: block;
-  width: 27px;
-  height: 27px;
+  width: 26px;
+  height: 26px;
   fill: var(--marker-color, var(--blue));
   stroke: var(--surface);
   stroke-width: 1.4;
@@ -258,14 +275,14 @@ select:focus:not(:focus-visible),
   transition: transform 400ms ease;
 }
 
-/* Selection halo: the active vehicle reads as one object with its card. */
-.map-marker.is-selected::before {
-  content: '';
+/* The ring that makes the arrow read as a placed object rather than an icon floating
+   over the map, and the reason a sleeping car stays findable at a glance. */
+.map-marker-halo {
   position: absolute;
-  inset: 1px;
+  inset: 7px;
   border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--marker-color, var(--blue)) 20%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--marker-color, var(--blue)) 45%, transparent);
+  background: color-mix(in srgb, var(--marker-color, var(--blue)) 16%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--marker-color, var(--blue)) 42%, transparent);
 }
 
 .map-marker-sleeping .map-marker-arrow,
@@ -345,6 +362,85 @@ select:focus:not(:focus-visible),
 
 .maplibregl-ctrl-attrib a {
   color: var(--ink-secondary) !important;
+}
+
+/* ============================================================
+   DASHBOARD — REORDERABLE WIDGETS (react-grid-layout)
+   ============================================================ */
+
+/* The card's header band is the drag surface, so the whole strip answers to a pointer
+   rather than a 22px dot somewhere inside it. `touch-action: none` is what makes a finger
+   drag move the card instead of scrolling the page — and it is on the header only, so the
+   body of every card still scrolls normally and the map in the Location card keeps panning
+   the map. */
+.dash-head {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  margin: -0.5rem -0.75rem 0.25rem;
+  padding: 0.5rem 0.75rem 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.dash-head:active {
+  cursor: grabbing;
+}
+
+/* The grid item is the box react-grid-layout sizes; the 12px of padding-bottom is the row
+   gap, paid for inside the height so a card's `h` stays its own pixel height plus the gap. */
+.dash-grid-root {
+  min-height: 320px;
+}
+
+.dash-cell {
+  padding-bottom: 12px;
+}
+
+.dash-measure {
+  height: 100%;
+}
+
+/* Header plus body: the element whose height is the card's content, which is what the grid
+   measures to decide how much room the card needs. It must not shrink — a stack that
+   reported the box instead of its content would ratchet every card taller each pass. */
+.dash-stack {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The only way a card can end up shorter than its content is a data change landing between
+   two measurements. It scrolls in that window rather than drawing over its own border. */
+.dash-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+/* The lifted card should look lifted, and the grid item is transparent, so the shadow
+   belongs on the card inside it. */
+.react-grid-item.react-draggable-dragging .dash-card {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Cards are not resizable, but the library still renders a handle on every one of them and
+   reveals it on hover. A corner that appears under the pointer and then does nothing is a
+   lie about what the interface can do, so it is removed rather than restyled. */
+.react-grid-item > .react-resizable-handle {
+  display: none !important;
+}
+
+/* The library's placeholder is a red block at 20% opacity. It marks where the card will
+   land, so it should read as part of the surface, not as an error. */
+.react-grid-item.react-grid-placeholder {
+  background: var(--surface-muted) !important;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-xl);
+  opacity: 1;
+}
+
+[data-theme='dark'] .react-grid-item.react-grid-placeholder {
+  background: var(--surface-elevated) !important;
 }
 
 /* ============================================================

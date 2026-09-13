@@ -65,12 +65,12 @@ Apply Supabase migrations in order:
 ## Mandatory access flow
 
 1. Sign in to app account at `/login` (Supabase identity)
-2. Go to `/settings`
+2. Open `/tesla-login`
 3. Connect Tesla via `/api/fleet/connect`
-4. Complete Tesla OAuth callback
+4. Complete Tesla OAuth callback (returns to `/tesla-login`)
 5. Only then dashboard/routes are unlocked
 
-If Fleet authorization is missing, app routes redirect to `/settings?fleet=required`.
+If Fleet authorization is missing, app routes redirect to `/tesla-login?fleet=required`.
 
 ## Virtual key setup (required for commands + telemetry config)
 

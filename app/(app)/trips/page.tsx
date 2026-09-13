@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { MapView, type MapMarker } from '@/components/map/map-view'
+import { VehicleMap, type MapMarker } from '@/components/map/vehicle-map'
 import { PanelSkeleton } from '@/components/dashboard/vehicle-panels'
 import { BatteryChart, PowerChart, SpeedChart, type TripSeriesPoint } from '@/components/charts/telemetry-charts'
 import { Badge } from '@/components/ui/badge'
@@ -139,16 +139,19 @@ export default function TripsPage() {
 
         {selected && (
           <>
-            <div className="relative overflow-hidden rounded-xl border border-line bg-surface-muted">
-              <MapView markers={markers} route={selected.route.length >= 2 ? selected.route : []} fitRoute className="h-[34vh] min-h-[220px] w-full" />
-              {selected.route.length < 2 && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center">
-                  <p className="max-w-[380px] rounded-lg border border-line bg-surface/95 px-3.5 py-2.5 text-[12.5px] leading-4 text-ink-secondary">
+            <VehicleMap
+              markers={markers}
+              route={selected.route.length >= 2 ? selected.route : []}
+              fitRoute
+              className="h-[34vh] min-h-[220px] w-full rounded-xl"
+              placeholder={
+                <div className="flex h-full items-center justify-center px-6 text-center">
+                  <p className="max-w-[380px] text-[12.5px] leading-5 text-ink-tertiary">
                     No recorded route. This trip was measured by odometer delta, so there are no coordinates between the snapshots.
                   </p>
                 </div>
-              )}
-            </div>
+              }
+            />
 
             <div className="rounded-xl border border-line bg-surface p-4">
               <div className="flex flex-wrap items-center gap-2.5">

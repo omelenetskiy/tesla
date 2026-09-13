@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "assets": "node scripts/build-assets.mjs",
+    "predev": "node scripts/build-assets.mjs --vendor-only",
+    "prebuild": "node scripts/build-assets.mjs --vendor-only",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -33,6 +36,7 @@
     "postcss": "^8.5.28",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-grid-layout": "^2.2.4",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3"

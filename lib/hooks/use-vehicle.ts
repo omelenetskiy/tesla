@@ -4,12 +4,10 @@ import * as React from 'react'
 import type { VehicleStatusSnapshot, VehicleSummary } from '@/lib/tesla/models'
 
 /**
- * The browser's view of the vehicle feed (§22, §21, §48).
+ * The browser's view of the vehicle feed.
  *
- * The client never polls on a fixed loop: the interval is derived from the vehicle's
- * own reported state, and the server applies the authoritative gate on top of it. A
- * sleeping car therefore produces no repeating requests from either side, which is
- * the battery-drain failure §21 names explicitly.
+ * Continuous updates come from telemetry ingestion; this hook does a single load plus
+ * explicit manual refresh only.
  *
  * Reads go only to the application API — no component in this codebase can reach a
  * Tesla endpoint, and no token ever crosses the boundary (§11).
@@ -37,15 +35,6 @@ export type VehicleFeed = {
   refresh: (options?: { mayWake?: boolean }) => Promise<void>
 }
 
-/** Client-side cadence. Mirrors DEFAULT_POLLING_POLICY; the server remains the gate. */
-const INTERVALS: Record<string, number> = {
-  driving: 10_000,
-  charging: 30_000,
-  parked: 5 * 60_000,
-  sleeping: 0,
-  offline: 0,
-}
-
 export function useVehicleData(): VehicleFeed {
   const [snapshot, setSnapshot] = React.useState<VehicleStatusSnapshot | null>(null)
   const [vehicles, setVehicles] = React.useState<VehicleSummary[]>([])
@@ -69,6 +58,18 @@ export function useVehicleData(): VehicleFeed {
       if (input.vehicleId) params.set('vehicle', input.vehicleId)
       const query = params.toString()
       const response = await fetch(`/api/vehicle${query ? `?${query}` : ''}`, { cache: 'no-store' })
+      if (response.status === 403) {
+        setSnapshot(null)
+        setVehicles([])
+        setSelectedVehicleId(null)
+        selectedVehicleIdRef.current = null
+        setNeedsConnection(true)
+        setMessage('Tesla Fleet authorization is required before entering the app.')
+        setError(null)
+        setLoading(false)
+        setRefreshing(false)
+        return
+      }
       const payload = (await response.json()) as {
         snapshot?: VehicleStatusSnapshot
         vehicles?: VehicleSummary[]
@@ -111,18 +112,6 @@ export function useVehicleData(): VehicleFeed {
     })()
   }, [load])
 
-  // State-derived follow-up reads. `0` means "do not poll this state at all", which is
-  // what keeps a sleeping car from being poked by an open tab (§21).
-  const presence = snapshot?.status?.presence ?? null
-  const interval = presence ? (INTERVALS[presence] ?? 0) : 60_000
-  React.useEffect(() => {
-    if (!interval) return
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return
-      void load({ vehicleId: selectedVehicleIdRef.current })
-    }, interval)
-    return () => window.clearInterval(timer)
-  }, [interval, load])
 
   const selectVehicle = React.useCallback((id: string) => {
     selectedVehicleIdRef.current = id

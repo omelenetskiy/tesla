@@ -303,6 +303,7 @@ function FleetNotice({ onDismissed }: { onDismissed: () => void }) {
   const detail = params.get('detail')
   const scopes = params.get('scopes')
   const ok = outcome === 'connected'
+  const required = outcome === 'required'
 
   const dismiss = () => {
     setDismissed(true)
@@ -314,14 +315,16 @@ function FleetNotice({ onDismissed }: { onDismissed: () => void }) {
   return (
     <div
       role="status"
-      className={cn('mb-3 flex items-start gap-3 rounded-xl border p-3.5 text-[13px]', ok ? 'border-ok-line bg-ok-soft text-ink' : 'border-danger-line bg-danger-soft text-ink')}
+      className={cn('mb-3 flex items-start gap-3 rounded-xl border p-3.5 text-[13px]', ok ? 'border-ok-line bg-ok-soft text-ink' : required ? 'border-warn-line bg-warn-soft text-ink' : 'border-danger-line bg-danger-soft text-ink')}
     >
       <span className="min-w-0 flex-1">
-        <span className="block font-medium">{ok ? 'Tesla account connected.' : `Tesla authorization did not complete${reason ? ` (${reason})` : ''}.`}</span>
+        <span className="block font-medium">{ok ? 'Tesla account connected.' : required ? 'Tesla Fleet authorization is required to enter the app.' : `Tesla authorization did not complete${reason ? ` (${reason})` : ''}.`}</span>
         <span className="mt-1 block text-[12.5px] leading-5 text-ink-secondary">
           {ok
             ? `Granted scopes: ${scopes ? scopes.replace(/,/g, ' ') : 'unknown'}. The next step is the virtual key below — commands and telemetry are refused without it.`
-            : (detail ?? 'Start again from the button below; if it repeats, the reason is shown in the server log.')}
+            : required
+              ? 'Connect Tesla first. Until authorization is complete, dashboard and telemetry pages stay locked by design.'
+              : (detail ?? 'Start again from the button below; if it repeats, the reason is shown in the server log.')}
         </span>
       </span>
       <button type="button" onClick={dismiss} className="shrink-0 rounded-md px-2 py-1 text-[12.5px] text-ink-secondary transition hover:bg-surface">

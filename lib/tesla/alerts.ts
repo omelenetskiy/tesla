@@ -1,3 +1,4 @@
+import { anyPartOpen } from './models'
 import type { VehicleStatus, VehicleStatusSnapshot } from './models'
 
 /**
@@ -32,8 +33,8 @@ const SERVICE_MODE_LABEL: Record<number, string> = {
 }
 
 /** Typical Tesla cold inflation is ~42 psi; these bands are deliberately generous. */
-const TIRE_LOW_PSI = 29
-const TIRE_HIGH_PSI = 55
+export const TIRE_LOW_PSI = 29
+export const TIRE_HIGH_PSI = 55
 
 export function deriveAlerts(snapshot: VehicleStatusSnapshot | null): VehicleAlert[] {
   const alerts: VehicleAlert[] = []
@@ -92,8 +93,8 @@ export function deriveAlerts(snapshot: VehicleStatusSnapshot | null): VehicleAle
   }
 
   const openParts = [
-    state.embeddedLeft && 'Left doors',
-    state.embeddedRight && 'Right doors',
+    anyPartOpen(state.doors) && 'Doors',
+    anyPartOpen(state.windows) && 'Windows',
     state.trunkFrontOpen && 'Frunk',
     state.trunkRearOpen && 'Trunk',
   ].filter(Boolean) as string[]
@@ -103,7 +104,7 @@ export function deriveAlerts(snapshot: VehicleStatusSnapshot | null): VehicleAle
       severity: 'warning',
       title: `${openParts.join(', ')} open`,
       detail: null,
-      source: 'vehicle_state.df/dr/pf/pr/ft/rt',
+      source: 'vehicle_state.df/dr/pf/pr, *_window, ft, rt',
     })
   }
 

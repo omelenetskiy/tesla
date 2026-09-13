@@ -7,26 +7,21 @@ import { resolveVehicle } from '@/lib/tesla/service'
 
 export const dynamic = 'force-dynamic'
 
+function fleetCookieAllowed(fleet: Record<string, unknown>): boolean {
+  const auth = fleet.auth as { state?: string } | undefined
+  return fleet.configured === true && auth?.state === 'AUTHORIZED'
+}
+
 /**
- * GET /api/settings — the Fleet account state, and nothing else.
- *
- * The collection-mode section this used to drive is gone: with telemetry as the only
- * continuous source and "never wake the car" as the rule, there was no mode left to choose.
- * Keeping the control would have implied a knob that no longer changes anything.
+ * GET /api/settings - the Fleet account state, and nothing else.
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
+
   const supabase = getSupabaseAdmin()
   const row = await resolveVehicle(user.id, new URL(request.url).searchParams.get('vehicle'))
 
-  /*
-   * Fleet state is reported independently of the vehicle row. Coupling the two is what
-   * made a successful authorization look like a failure: the token was stored, but no
-   * vehicle had been synced yet (that is P2, blocked on the unpinned response shape), so
-   * the card went straight back to "Connect Tesla" and the operator saw the flow as
-   * broken. Two facts, two lines.
-   */
   let fleet: Record<string, unknown>
   try {
     const config = fleetConfig()
@@ -34,9 +29,7 @@ export async function GET(request: Request) {
       configured: true,
       region: config.region,
       redirectUri: config.redirectUri,
-      // The URL that withdraws the grant on Tesla's side. Our own delete only forgets the
-      // tokens; without this the operator has to go hunting for the setting.
-      revokeUrl: consentRevokeUrl(config.clientId, config.redirectUri.replace(/\/api\/fleet\/callback$/, '/settings')),
+      revokeUrl: consentRevokeUrl(config.clientId, config.redirectUri.replace(/\/api\/fleet\/callback$/, '/tesla-login')),
       auth: await diagnoseFleetAuth(user.id),
     }
   } catch (error) {
@@ -48,7 +41,19 @@ export async function GET(request: Request) {
   }
 
   if (!row) {
-    return NextResponse.json({ connected: false, fleet })
+    const response = NextResponse.json({ connected: false, fleet })
+    if (fleetCookieAllowed(fleet)) {
+      response.cookies.set('fleet_authorized', '1', {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 90,
+      })
+    } else {
+      response.cookies.delete('fleet_authorized')
+    }
+    return response
   }
 
   const { data: settings } = await supabase
@@ -57,15 +62,27 @@ export async function GET(request: Request) {
     .eq('user_id', user.id)
     .maybeSingle()
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     connected: true,
     fleet,
     vehicle: { id: row.id, name: row.display_name, distanceUnit: row.distance_unit },
     settings: settings ?? null,
   })
+  if (fleetCookieAllowed(fleet)) {
+    response.cookies.set('fleet_authorized', '1', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 90,
+    })
+  } else {
+    response.cookies.delete('fleet_authorized')
+  }
+  return response
 }
 
-/** PATCH /api/settings — display units only. */
+/** PATCH /api/settings - display units only. */
 export async function PATCH(request: Request) {
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })

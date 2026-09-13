@@ -27,14 +27,14 @@ export async function GET(request: Request) {
   } catch (error) {
     const reason = error instanceof FleetConfigError ? 'not-configured' : 'config-error'
     const detail = error instanceof Error ? encodeURIComponent(error.message.slice(0, 200)) : ''
-    return NextResponse.redirect(new URL(`/settings?fleet=error&reason=${reason}${detail ? `&detail=${detail}` : ''}`, request.url))
+    return NextResponse.redirect(new URL(`/tesla-login?fleet=error&reason=${reason}${detail ? `&detail=${detail}` : ''}`, request.url))
   }
 
   // Refuse before sending the user to Tesla, not after. With a stale redirect URI the flow
   // *looks* successful — Tesla authorizes, redirects, and the one-time code dies on a 404
   // that this app never sees. The code cannot be replayed, so every attempt is wasted.
   if (config.redirectPathWarning) {
-    return NextResponse.redirect(new URL(`/settings?fleet=error&reason=wrong-callback-path&detail=${encodeURIComponent(config.redirectPathWarning)}`, request.url))
+    return NextResponse.redirect(new URL(`/tesla-login?fleet=error&reason=wrong-callback-path&detail=${encodeURIComponent(config.redirectPathWarning)}`, request.url))
   }
 
   const authorization = createAuthorizationRequest()

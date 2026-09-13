@@ -12,7 +12,7 @@ export async function proxy(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           response = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
         },
@@ -20,21 +20,46 @@ export async function proxy(request: NextRequest) {
     },
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
   const path = request.nextUrl.pathname
-  // /api/collect is called by a scheduler with a bearer secret, never by a browser
-  // session — redirecting it to /login made background collection unreachable, and
-  // the collector's own credential check is what guards it. Exact match only.
-  // /api/fleet/callback is exempt for a different reason: the one-time code Tesla just
-  // issued would be consumed by a redirect to /login and lost. The route checks the
-  // session itself and reports the reason instead.
-  const isPublic = path === '/api/collect' || path === '/api/fleet/callback' || path.startsWith('/login') || path.startsWith('/auth') || path.startsWith('/_next')
+  const publicPaths = ['/api/fleet/callback', '/.well-known/appspecific/com.tesla.3p.public-key.pem']
+
+  const isPublic =
+    publicPaths.includes(path) ||
+    path.startsWith('/login') ||
+    path.startsWith('/auth') ||
+    path.startsWith('/_next') ||
+    path.startsWith('/maplibre/') ||
+    path.startsWith('/icons/') ||
+    path === '/manifest.webmanifest'
+
   if (!user && !isPublic) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
-  if (user && request.nextUrl.pathname === '/login') {
+
+  const fleetAuthorized = request.cookies.get('fleet_authorized')?.value === '1'
+  const isApi = path.startsWith('/api/')
+  const canConnectFleet =
+    path === '/tesla-login' ||
+    path === '/settings' ||
+    path.startsWith('/api/settings') ||
+    path.startsWith('/api/fleet/')
+
+  if (user && !isPublic && !isApi && !canConnectFleet && !fleetAuthorized) {
+    return NextResponse.redirect(new URL('/tesla-login?fleet=required', request.url))
+  }
+
+  if (user && path === '/login') {
+    return NextResponse.redirect(new URL(fleetAuthorized ? '/' : '/tesla-login?fleet=required', request.url))
+  }
+
+  if (user && path === '/tesla-login' && fleetAuthorized) {
     return NextResponse.redirect(new URL('/', request.url))
   }
+
   return response
 }
 

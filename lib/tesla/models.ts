@@ -115,13 +115,37 @@ export type ClimateState = {
 }
 
 /** `vehicle_state` in the API response — physical/vehicle status, not presence. */
+export type DoorState = { driverFront: boolean | null; driverRear: boolean | null; passengerFront: boolean | null; passengerRear: boolean | null }
+
+export type WindowState = { frontDriver: boolean | null; frontPassenger: boolean | null; rearDriver: boolean | null; rearPassenger: boolean | null }
+
+/**
+ * True when at least one reported part is open; null when nothing was reported at all.
+ *
+ * `undefined` is part of the signature on purpose: snapshots are stored as JSON, so a
+ * row written before these fields existed has neither key. It must read as "unknown",
+ * not crash the alert pass.
+ */
+export function anyPartOpen<T extends Record<string, boolean | null>>(part: T | null | undefined): boolean | null {
+  if (!part) return null
+  const known = Object.values(part).filter((value): value is boolean => value !== null)
+  if (!known.length) return null
+  return known.some((value) => value)
+}
+
 export type VehicleState = {
   odometerKm: number | null
   rawOdometerMiles: number | null
   softwareVersion: string | null
   locked: boolean | null
-  embeddedLeft: boolean | null
-  embeddedRight: boolean | null
+  /**
+   * `vehicle_state.df/dr/pf/pr` — driver-side and passenger-side, front and rear.
+   * `null` for the whole record when Tesla reported none of them, which is what a
+   * sleeping vehicle does; a per-door `null` means that one door was absent.
+   */
+  doors: DoorState | null
+  /** `fd_window/fp_window/rd_window/rp_window` — 1 means lowered, not "broken". */
+  windows: WindowState | null
   trunkFrontOpen: boolean | null
   trunkRearOpen: boolean | null
   sentryMode: boolean | null

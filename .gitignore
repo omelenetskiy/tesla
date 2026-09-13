@@ -19,6 +19,15 @@ out/
 .DS_Store
 .idea/
 
+# Tesla key and certificate material. The private half signs vehicle commands and telemetry
+# configurations; if it is ever published, every car that paired with the public half has to
+# be re-paired by a trusted user — which is not something the app can undo or rotate silently.
+keys/
+*.pem
+*.key
+*.crt
+!public/.well-known/appspecific/com.tesla.3p.public-key.pem
+
 .claude
 .cursor
 .agents

@@ -175,6 +175,25 @@ export function isAccessTokenValid(expiresAt: string | null, skewMs: number, now
 }
 
 /**
+ * Partner (machine-to-machine) token.
+ *
+ * Not used to read or command a customer's car — that is the owner grant above. This one
+ * exists for the two account-level calls that have no vehicle in them: registering the
+ * application's public key, and deleting a telemetry config across the whole account. Both
+ * are documented as partner-token operations, and calling them with an owner token is what
+ * produces the `412 Unregistered account` answer.
+ */
+export async function requestPartnerToken(config: FleetConfig = fleetConfig()): Promise<FleetTokenSet> {
+  return postForm(config, {
+    grant_type: 'client_credentials',
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    audience: config.audience,
+    scope: 'openid user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds',
+  }, '/oauth2/v3/token')
+}
+
+/**
  * Reads the code off a pasted callback URL.
  *
  * `state` is verified when the caller supplies the expected value: accepting any code from

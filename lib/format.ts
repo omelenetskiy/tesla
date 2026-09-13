@@ -54,6 +54,28 @@ export function formatEfficiency(whPerKm: number | null | undefined): string {
   return whPerKm === null || whPerKm === undefined ? DASH : `${number(Math.round(whPerKm))} Wh/km`
 }
 
+const PSI_TO_BAR = 0.06804596395872915
+
+/**
+ * Tesla reports tyre pressure in psi; the market this car is driven in reads bar.
+ * Converted at the edge of the model rather than stored, so the raw field stays
+ * comparable with the alert thresholds, which are psi.
+ */
+export function psiToBar(psi: number): number {
+  return psi * PSI_TO_BAR
+}
+
+export function formatBar(psi: number | null | undefined): string {
+  if (psi === null || psi === undefined || !Number.isFinite(psi)) return DASH
+  return `${number(psiToBar(psi), 1)} bar`
+}
+
+/** kWh/100 km from Wh/km — the unit the car's own screen uses. */
+export function formatKwhPer100Km(whPerKm: number | null | undefined): string {
+  if (whPerKm === null || whPerKm === undefined || !Number.isFinite(whPerKm)) return DASH
+  return `${number(whPerKm / 10, 1)} kWh/100 km`
+}
+
 export function formatTime(iso: string | null | undefined): string {
   if (!iso) return DASH
   const at = Date.parse(iso)

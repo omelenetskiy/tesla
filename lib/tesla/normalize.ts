@@ -417,13 +417,27 @@ export function normalizeClimateState(raw: Partial<RawClimateState> | undefined)
 
 export function normalizeVehicleState(raw: Partial<RawVehicleState> | undefined): VehicleState {
   const pressures = raw?.tire_pressure_psi
+  const doors = {
+    driverFront: flag(raw?.df),
+    driverRear: flag(raw?.dr),
+    passengerFront: flag(raw?.pf),
+    passengerRear: flag(raw?.pr),
+  }
+  const windows = {
+    frontDriver: flag(raw?.fd_window),
+    frontPassenger: flag(raw?.fp_window),
+    rearDriver: flag(raw?.rd_window),
+    rearPassenger: flag(raw?.rp_window),
+  }
   return {
     odometerKm: milesToKm(raw?.odometer),
     rawOdometerMiles: num(raw?.odometer),
     softwareVersion: str(raw?.car_version) ?? str(raw?.software_update?.version),
     locked: bool(raw?.locked),
-    embeddedLeft: flag(raw?.df) ?? flag(raw?.dr),
-    embeddedRight: flag(raw?.pf) ?? flag(raw?.pr),
+    // A record where every part is absent is reported as null rather than as four
+    // nulls, so "all closed" and "the car never told us" cannot be confused downstream.
+    doors: Object.values(doors).some((value) => value !== null) ? doors : null,
+    windows: Object.values(windows).some((value) => value !== null) ? windows : null,
     trunkFrontOpen: bool(raw?.front_trunk_open) ?? flag(raw?.ft),
     trunkRearOpen: bool(raw?.rear_trunk_open) ?? flag(raw?.rt),
     sentryMode: bool(raw?.sentry_mode),

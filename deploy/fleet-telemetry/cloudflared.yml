@@ -1,0 +1,26 @@
+# Tunnel that does NOT terminate TLS.
+#
+# The requirement, stated once so the config is not mistaken for gospel: the edge must relay
+# raw TLS to the origin. If the provider terminates TLS, the vehicle's client certificate never
+# reaches fleet-telemetry, and because the server is `RequireAndVerifyClientCert` every
+# handshake dies with `tls: bad certificate` — which reads like a cert problem on our side and
+# is actually a tunnel problem.
+#
+# Cloudflare renames these keys between docs revisions; confirm against
+# developers.cloudflare.com before relying on it. `proxy_protocol: 2` carries the real client
+# address, which matters when you want to see which car connected.
+
+tunnel: fleet-telemetry
+credentials-file: /root/.cloudflared/credentials.json
+
+ingress:
+  - hostname: telemetry.example.com
+    service: tls://127.0.0.1:443
+    proxy_protocol: 2
+    # Passthrough: the origin presents its own publicly trusted certificate, and the car
+    # validates it against the `ca` value sent in fleet_telemetry_config.
+    originRequest:
+      serverName: telemetry.example.com
+      noTLSVerify: false
+
+  - service: http_status:404

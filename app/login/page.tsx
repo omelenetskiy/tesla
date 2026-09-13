@@ -39,19 +39,22 @@ export default function LoginPage() {
       setLoading(false)
       return
     }
-    router.push('/')
+    router.push('/tesla-login')
     router.refresh()
   }
 
   const field = 'h-10 w-full rounded-lg border border-line bg-surface px-3 text-[14px] text-ink placeholder:text-ink-tertiary focus-visible:border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/25'
 
+  // In the installed app this is the first screen and the one an owner adds to the home
+  // screen from, so the card is centred in the space the status bar and the home indicator
+  // leave rather than in the whole panel.
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-canvas p-4">
+    <main className="flex min-h-dvh items-center justify-center bg-canvas px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-[calc(1rem+env(safe-area-inset-top))]">
       <section className="w-full max-w-[380px] rounded-2xl border border-line bg-surface p-6 shadow-sm">
         <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary">DriveScope</p>
         <h1 className="mt-1 text-[19px] font-semibold tracking-[-0.01em] text-ink">{mode === 'login' ? 'Sign in' : 'Create your account'}</h1>
         <p className="mt-1.5 text-[13px] leading-5 text-ink-secondary">
-          This is the app&apos;s own account, not your Tesla account. Tesla sign-in is a separate step you complete on Tesla&apos;s own site — this app never sees your Tesla password.
+          Step 1 of 2: sign in to your app account. After this screen, you continue to a dedicated Tesla sign-in page that opens Tesla&apos;s own OAuth flow.
         </p>
 
         <form onSubmit={submit} className="mt-5 space-y-3">

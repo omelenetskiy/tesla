@@ -8,6 +8,11 @@
  * the five-state model (§7), the polling gate (§21), and the retry/refresh policy (§20).
  */
 
+import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+
 import { classifyStatus, parseRetryAfter, isRefreshEligible, retryDelayMs, TeslaApiError } from '../lib/tesla/errors.ts'
 import { redactJsonText, redactText, sanitizeHeaders, sanitizeUrl } from '../lib/tesla/sanitize.ts'
 import { deriveModel, derivePresence, freshnessFor, isVehicleAwake, milesToKm, normalizeChargeState, normalizeVehicleStatus, normalizeVehicleState } from '../lib/tesla/normalize.ts'
@@ -15,6 +20,10 @@ import { authBaseForHost, authBaseForIssuer, teslaConfig } from '../lib/tesla/co
 import { resolveOwnerApiId } from '../lib/tesla/identity.ts'
 import { createFleetConfig, normaliseFleetRegion, consentRevokeUrl, FLEET_SCOPES, FLEET_CALLBACK_PATH } from '../lib/fleet/config.ts'
 import { assertUsableVehicleTag, fleetVehicleTag } from '../lib/fleet/client.ts'
+import { PUBLIC_KEY_WELL_KNOWN_PATH, fingerprint, hostnameMatchesAppDomain, loadPrivateKey, publicKeyPemFromPrivate, rootDomain } from '../lib/fleet/keys.ts'
+import { GLYPHS_URL, SOURCE_MAX_ZOOM, TILEJSON_URL, buildBasemapStyle } from '../lib/map/basemap.ts'
+import { CARD_SPEC, DEFAULT_LAYOUT, DASHBOARD_CARDS, LAYOUT_STORAGE_KEY, ROW_GAP, columnsFor, commitReport, fitToColumns, parseLayout, toStorage, type Placement } from '../lib/dashboard/layout.ts'
+import { anyPartOpen } from '../lib/tesla/models.ts'
 import { accessTokenExpiryIso, buildAuthorizationUrl as buildFleetAuthorizationUrl, createAuthorizationRequest, decodeFleetToken, exchangeAuthorizationCode, parseCallbackUrl, refreshFleetTokens, scopesFromTokenSet } from '../lib/fleet/auth.ts'
 import { buildAuthorizationUrl } from '../lib/tesla/auth.ts'
 import { DEFAULT_POLLING_POLICY, PASSIVE_POLLING_POLICY, policyFor, resolvePollingProfile, shouldCollect } from '../lib/tesla/provider.ts'
@@ -23,11 +32,13 @@ import {
   PRESENCE_COLOR,
   completenessNote,
   formatAge,
+  formatBar,
   formatDayHeading,
   formatDistanceShort,
   formatDuration,
   formatEfficiency,
   formatKm,
+  formatKwhPer100Km,
   formatPercent,
   formatTempCelsius,
   freshnessTone,
@@ -93,7 +104,7 @@ eq('absent field is null, never 0', normalizeChargeState({}).stateOfCharge, null
 const state = normalizeVehicleState({ odometer: 12_345.6, car_version: '2026.20.3', locked: true, df: 0, ft: false })
 eq('odometer miles → km', state.odometerKm, 19_868.3)
 eq('software version passthrough', state.softwareVersion, '2026.20.3')
-eq('door flag 0 means closed', state.embeddedLeft, false)
+eq('door flag 0 means closed', state.doors?.driverFront, false)
 
 // ── §7 five-state model ─────────────────────────────────────────────────────
 const parked = { stateOfCharge: 80, chargingConnection: 'disconnected' as const }
@@ -627,6 +638,427 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
   eq('the correct route is not flagged', good.redirectPathWarning, null)
   eq('scopes fall back to the pinned set', good.scopes, [...FLEET_SCOPES])
   eq('TESLA_FLEET_SCOPES overrides verbatim', createFleetConfig({ region: 'eu', clientId: 'c', clientSecret: 's', redirectUri: 'http://l/x'.replace('/x', FLEET_CALLBACK_PATH), scopeOverride: 'openid vehicle_device_data' }).scopes, ['openid', 'vehicle_device_data'])
+}
+
+// ── deploy/fleet-telemetry: files nobody type-checks, so pin their shape ────
+{
+  const raw = readFileSync('deploy/fleet-telemetry/config.local.json', 'utf8')
+  const cfgJson = JSON.parse(raw) as Record<string, any>
+  eq('receiver port is 443', cfgJson.port, 443)
+  check('tls cert and key paths are set', Boolean(cfgJson.tls?.server_cert && cfgJson.tls?.server_key), JSON.stringify(cfgJson.tls ?? {}))
+  const dispatchers = ['pubsub', 'kafka', 'kinesis', 'logger', 'zmq', 'mqtt', 'redis']
+  const used = Object.values(cfgJson.records ?? {}).flat() as string[]
+  check('every dispatcher is one of the seven that exist', used.length > 0 && used.every((name) => dispatchers.includes(name)), JSON.stringify(cfgJson.records))
+  check('connectivity is dispatched (off by default upstream)', Array.isArray(cfgJson.records?.connectivity), JSON.stringify(cfgJson.records))
+  check('V/alerts/errors are all dispatched', ['V', 'alerts', 'errors'].every((key) => Array.isArray(cfgJson.records?.[key]) && cfgJson.records[key].length))
+  // The upstream README shows `reliable_ack`; the Go struct field is `reliable_ack_sources`.
+  // Copying the README key is silently ignored, which is worse than an error.
+  check('the README-only reliable_ack key is not used', !('reliable_ack' in cfgJson), Object.keys(cfgJson).join(','))
+  eq('frames are decoded to JSON for the logger', cfgJson.transmit_decoded_records, true)
+  eq('logger is verbose so field types are visible', cfgJson.logger?.verbose, true)
+
+  const script = readFileSync('deploy/fleet-telemetry/configure-vehicle.mts', 'utf8')
+  // The intuitive names do not exist in the Field enum and reject the whole config.
+  for (const wrong of ['Speed:', 'Heading:', 'Power:', 'ShiftState:']) {
+    check(`the default field set avoids the non-existent ${wrong.replace(':', '')}`, !script.includes(`  ${wrong}`))
+  }
+  check('it uses the real VehicleSpeed name', script.includes('VehicleSpeed: {'))
+  check('it asks for PackVoltage/PackCurrent, which do exist', script.includes('PackVoltage:') && script.includes('PackCurrent:'))
+}
+
+// ── The virtual key: curve, served path, and the drift guards between them ──
+{
+  eq('root domain of a subdomain', rootDomain('telemetry.example.com'), 'example.com')
+  eq('root domain of a bare host', rootDomain('example.com'), 'example.com')
+  eq('root domain from a full URL', rootDomain('https://tesla.example.com:3000/x'), 'example.com')
+  check('a telemetry host under the same root matches', hostnameMatchesAppDomain('telemetry.example.com', 'https://tesla.example.com'))
+  check('a different root does not match (Tesla rejects the config)', !hostnameMatchesAppDomain('telemetry.other.com', 'https://tesla.example.com'))
+  check('a free tunnel host does not match an own domain', !hostnameMatchesAppDomain('abc-123.ngrok-free.app', 'https://tesla.example.com'))
+
+  const { generateKeyPairSync } = await import('node:crypto')
+  const good = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+  const pem = publicKeyPemFromPrivate(good.privateKey)
+  check('public half is a SubjectPublicKeyInfo PEM', pem.startsWith('-----BEGIN PUBLIC KEY-----') && pem.trim().endsWith('-----END PUBLIC KEY-----'), pem.slice(0, 40))
+  check('fingerprint is stable and hex', /^[0-9a-f]{64}$/.test(fingerprint(pem)))
+  eq('the same key fingerprints identically', fingerprint(pem), fingerprint(publicKeyPemFromPrivate(good.privateKey)))
+
+  const tmp = join(tmpdir(), `fleet-key-${process.pid}`)
+  await mkdir(tmp, { recursive: true })
+  const p256 = join(tmp, 'p256.pem')
+  const p384 = join(tmp, 'p384.pem')
+  await writeFile(p256, good.privateKey.export({ type: 'pkcs8', format: 'pem' }))
+  await writeFile(p384, generateKeyPairSync('ec', { namedCurve: 'secp384r1' }).privateKey.export({ type: 'pkcs8', format: 'pem' }))
+  check('a prime256v1 key loads', (() => {
+    try {
+      return loadPrivateKey(p256).asymmetricKeyDetails?.namedCurve === 'prime256v1'
+    } catch {
+      return false
+    }
+  })())
+  const wrongCurve = (() => {
+    try {
+      loadPrivateKey(p384)
+      return 'accepted'
+    } catch (error) {
+      return error instanceof Error ? error.message : 'threw'
+    }
+  })()
+  check('a secp384r1 key is refused by name, not accepted silently', wrongCurve.includes('prime256v1') && wrongCurve.includes('secp384r1'), wrongCurve)
+  check('a missing key file says so', (() => {
+    try {
+      loadPrivateKey(join(tmp, 'nope.pem'))
+      return false
+    } catch (error) {
+      return error instanceof Error && error.message.includes('Could not read')
+    }
+  })())
+  await rm(tmp, { recursive: true, force: true })
+
+  // The key is served statically from public/.well-known/... and the middleware must not
+  // redirect that request to /login.
+  const nextConfig = (await import('../next.config.ts')).default as Record<string, unknown>
+  check('next.config does not rely on a rewrite for the Tesla key path', !('rewrites' in nextConfig))
+  const staticKeyPath = `public${PUBLIC_KEY_WELL_KNOWN_PATH}`
+  check('the static .well-known key path exists in the repo', existsSync(staticKeyPath), staticKeyPath)
+  const proxySource = readFileSync('proxy.ts', 'utf8')
+  check('the middleware lets Tesla fetch the key unauthenticated', proxySource.includes(PUBLIC_KEY_WELL_KNOWN_PATH))
+  const gitignore = readFileSync('.gitignore', 'utf8')
+  check('private key material is gitignored', /\nkeys\//.test(gitignore) && gitignore.includes('*.pem') && gitignore.includes('*.key'))
+}
+
+// ── Basemap: built locally, so it is checkable without a browser ────────────
+{
+  /**
+   * The layer names OpenFreeMap's TileJSON advertises (read from
+   * https://tiles.openfreemap.org/planet). A `source-layer` outside this set draws
+   * nothing, silently, forever — which is exactly the "why is this layer missing" bug
+   * that costs a day to find.
+   */
+  const TILESET_LAYERS = new Set(['aerodrome_label', 'aeroway', 'boundary', 'building', 'housenumber', 'landcover', 'landuse', 'mountain_peak', 'park', 'place', 'poi', 'transportation', 'transportation_name', 'water', 'water_name', 'waterway'])
+
+  for (const mode of ['light', 'dark'] as const) {
+    const style = buildBasemapStyle(mode)
+    const layers = style.layers ?? []
+    eq(`basemap ${mode}: style spec version`, style.version, 8)
+    check(`basemap ${mode}: declares no sprite`, !('sprite' in style), JSON.stringify((style as { sprite?: unknown }).sprite))
+    check(`basemap ${mode}: requests no icons`, !JSON.stringify(layers).includes('icon-image'))
+    check(`basemap ${mode}: layer count stays small`, layers.length >= 12 && layers.length <= 24, `${layers.length}`)
+    check(`basemap ${mode}: layer ids are unique`, new Set(layers.map((layer) => layer.id)).size === layers.length)
+    const source = (style.sources as Record<string, { url?: string; tiles?: string[] }>).openmaptiles
+    check(`basemap ${mode}: tileset resolved through TileJSON`, source?.url === TILEJSON_URL && source.tiles === undefined, JSON.stringify(source))
+    eq(`basemap ${mode}: glyphs declared for labels`, style.glyphs, GLYPHS_URL)
+    const referenced = new Set(layers.map((layer) => (layer as { 'source-layer'?: string })['source-layer']).filter((name): name is string => Boolean(name)))
+    const unknown = Array.from(referenced).filter((name) => !TILESET_LAYERS.has(name))
+    check(`basemap ${mode}: every source-layer exists in the tileset`, unknown.length === 0, unknown.join(', '))
+    const colors = JSON.stringify(style).match(/#[0-9a-zA-Z]{3,8}\b/g) ?? []
+    check(`basemap ${mode}: colors are all 6-digit hex`, colors.every((color) => /^#[0-9a-f]{6}$/i.test(color)), colors.filter((c) => !/^#[0-9a-f]{6}$/i.test(c)).join(','))
+    check(`basemap ${mode}: has a background layer`, layers[0]?.type === 'background')
+  }
+
+  const backgroundOf = (mode: 'light' | 'dark') => ((buildBasemapStyle(mode).layers ?? [])[0] as { paint?: { 'background-color'?: string } }).paint?.['background-color']
+  check('the light and dark palettes actually differ', backgroundOf('light') !== backgroundOf('dark'), `${backgroundOf('light')} vs ${backgroundOf('dark')}`)
+  eq('the source ceiling is the measured maxzoom', SOURCE_MAX_ZOOM, 14)
+
+  const mapSource = readFileSync('components/map/vehicle-map.tsx', 'utf8')
+  // The style is configurable per theme, so no URL is hardcoded in the component: what is
+  // pinned here is the resolution order and the fact that the built-in style still stands
+  // behind both variables.
+  check('the map picks a style per theme', mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_LIGHT') && mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_DARK'))
+  check('the legacy single-variable override still works', mapSource.includes('process.env.NEXT_PUBLIC_MAP_STYLE_URL,'))
+  check('the built-in style is still the fallback', /if \(!override\) return buildBasemapStyle\(mode\)/.test(mapSource))
+  check('no style URL is hardcoded in the component', !/tiles\.openfreemap\.org\/styles\//.test(mapSource))
+  const envExample = readFileSync('.env.example', 'utf8')
+  check('.env.example documents both theme variables', /NEXT_PUBLIC_MAP_STYLE_URL_LIGHT=/.test(envExample) && /NEXT_PUBLIC_MAP_STYLE_URL_DARK=/.test(envExample))
+  check('the old remote-style component is gone', !existsSync('components/map/map-view.tsx'))
+  check('the map adds no navigation chrome', !/NavigationControl|GeolocateControl|ScaleControl|FullscreenControl|LogoControl/.test(mapSource))
+  check('wheel zoom stays off', mapSource.includes('scrollZoom: false'))
+  check('the map container uses the unlayered .ds-map rule', mapSource.includes('className="ds-map"'))
+  const css = readFileSync('app/globals.css', 'utf8')
+  check('.ds-map sizes the container itself', /\.ds-map\s*\{[^}]*height:\s*100%/.test(css) && /\.ds-map\s*\{[^}]*position:\s*relative/.test(css))
+
+  // ── The tile worker ──────────────────────────────────────────────────────
+  // MapLibre derives the worker URL from `import.meta.url`, which the bundler rewrites to
+  // a chunk path where no worker exists. The worker then never starts, and because tiles
+  // are fetched *inside* it, the map silently paints only its background layer. Nothing in
+  // the console points at the real cause, so this is guarded by bytes, not by eyeballs.
+  const workerUrl = /export const MAP_WORKER_URL = '([^']+)'/.exec(mapSource)?.[1]
+  eq('the worker URL is declared', workerUrl, '/maplibre/maplibre-gl-worker.mjs')
+  check('the worker URL is applied before any map is built', mapSource.includes('setWorkerUrl(MAP_WORKER_URL)'))
+  check('the mount-time setStyle is guarded by the mode it was built with', mapSource.includes('modeRef.current === resolved'))
+  for (const file of ['maplibre-gl-worker.mjs', 'maplibre-gl-shared.mjs']) {
+    const shipped = `public/maplibre/${file}`
+    const installed = `node_modules/maplibre-gl/dist/${file}`
+    if (!existsSync(shipped)) {
+      check(`${shipped} exists`, false, 'run: node scripts/build-assets.mjs --vendor-only')
+      continue
+    }
+    eq(`${shipped} matches the installed maplibre`, readFileSync(shipped).equals(readFileSync(installed)), true)
+  }
+  // A middleware redirect turns the worker into an HTML document, which the browser
+  // rejects on MIME grounds — the same flat-colour failure from the other side.
+  const proxySource = readFileSync('proxy.ts', 'utf8')
+  check("the auth middleware leaves /maplibre/ alone", proxySource.includes("path.startsWith('/maplibre/')"))
+}
+
+// ── The dashboard is read-only, by rule and now by check ───────────────────
+{
+  const files = ['app/(app)/page.tsx', 'components/dashboard/status-cards.tsx', 'components/dashboard/cards.tsx', 'components/dashboard/dashboard-grid.tsx']
+  const dashboard = files.map((file) => readFileSync(file, 'utf8')).join('\n')
+  check('the dashboard sends no vehicle command', !/\/command\/|vehicle_cmds|wake_up|mayWake/.test(dashboard))
+  check('the dashboard renders no form control', !/<(input|select|textarea)\b/i.test(dashboard))
+  check('the dashboard never reaches Tesla directly', !/fleet-api|auth\.tesla|owner-api/.test(dashboard))
+  // The screen is read-only about the *car*. Two things on it address the page instead:
+  // the header band the grid drags a card by, and one button that forgets the arrangement.
+  // Anything beyond those two is a regression against the rule, not a nuisance.
+  const buttons = dashboard.match(/<button\b/g) ?? []
+  eq('exactly one button exists, and it resets the layout', buttons.length, 1)
+  check('that button is the layout reset', /Reset layout/.test(dashboard) && /onClick=\{onResetLayout\}/.test(dashboard))
+  check('the drag surface is a header band, not a control', /grid && 'dash-head'/.test(dashboard) && !/role="button"/.test(dashboard))
+  check('resetting forgets the arrangement rather than overwriting it', readFileSync('lib/hooks/use-dashboard-layout.ts', 'utf8').includes('removeItem'))
+}
+
+// ── The saved widget order ─────────────────────────────────────────────────
+{
+  const all = [...DASHBOARD_CARDS].sort()
+  const everyCard = (list: { i: string }[]) => [...list].map((p) => p.i).sort()
+  const byRow = (list: Placement[]) => list.every((p, i) => i === 0 || list[i - 1].y <= p.y)
+
+  eq('the default layout places every card once', everyCard(DEFAULT_LAYOUT), all)
+  eq('no card is missing a spec', DASHBOARD_CARDS.filter((id) => !CARD_SPEC[id]).length, 0)
+  eq('exactly one widget starts full width', DASHBOARD_CARDS.filter((id) => CARD_SPEC[id].w === 4), ['energy'])
+  // Compaction walks the array in order and moves each item up as far as it can, so a list
+  // whose order disagrees with its own y values is silently re-arranged on mount.
+  check('the default layout is declared top-to-bottom', byRow(DEFAULT_LAYOUT))
+
+  eq('nothing saved is the designed order', parseLayout(null), DEFAULT_LAYOUT)
+  eq('unparseable storage is not a layout', parseLayout('{"lg":['), DEFAULT_LAYOUT)
+  eq('the previous per-breakpoint shape is not a layout either', parseLayout(JSON.stringify({ lg: DEFAULT_LAYOUT })), DEFAULT_LAYOUT)
+
+  // The forward-compatibility rule: a card absent from storage is a card that did not
+  // exist when the layout was saved, and it still has to appear.
+  const partial = parseLayout(JSON.stringify([{ i: 'tyre', x: 2, y: 40, w: 2, h: 200 }, { i: 'ghost', x: 0, y: 0, w: 2, h: 100 }]))
+  eq('an unknown id is dropped', partial.some((p) => p.i === 'ghost'), false)
+  eq('a remembered card keeps its slot, and takes its content height', partial.find((p) => p.i === 'tyre'), { i: 'tyre', x: 2, y: 40, w: 2, h: CARD_SPEC.tyre.h + ROW_GAP })
+  eq('the cards storage never heard of come back', everyCard(partial), all)
+  eq('a repeated card is placed once', parseLayout(JSON.stringify([{ i: 'vehicle', x: 0, y: 0, w: 2, h: 400 }, { i: 'vehicle', x: 2, y: 9, w: 2, h: 400 }])).filter((p) => p.i === 'vehicle').length, 1)
+  eq('a negative row is refused, not stored', parseLayout(JSON.stringify([{ i: 'tyre', x: 0, y: -50, w: 2, h: 150 }])).find((p) => p.i === 'tyre')!.y, 0)
+  check('a layout read from storage is declared top-to-bottom', byRow(partial))
+
+  // A phone gets the same order, one card deep, whatever the desktop arrangement said.
+  const stretched = parseLayout(JSON.stringify([{ i: 'energy', x: 0, y: 0, w: 4, h: 182 }, { i: 'tyre', x: 2, y: 0, w: 2, h: 162 }]))
+  const narrowed = fitToColumns(stretched, 1)
+  eq('one column collapses the column count', new Set(narrowed.map((p) => p.x)).size, 1)
+  eq('a card cannot be wider than the screen has columns', Math.max(...narrowed.map((p) => p.w)), 1)
+  eq('narrowing keeps every card', everyCard(narrowed), all)
+  eq('narrowing keeps the order', narrowed.map((p) => p.i), stretched.map((p) => p.i))
+  eq('a full grid leaves the arrangement alone', fitToColumns(stretched, 4), stretched)
+  eq('the two-column threshold is a container width', [columnsFor(1196), columnsFor(700), columnsFor(390)], [4, 4, 1])
+
+  // No card stores a height: it is measured from its content every time the screen is drawn,
+  // which is what keeps a card from ever being shorter than the figures inside it.
+  const staleHeights = parseLayout(JSON.stringify([{ i: 'battery', x: 0, y: 0, w: 2, h: 40 }, { i: 'location', x: 2, y: 0, w: 2, h: 900 }]))
+  eq('a stored height is ignored', staleHeights.find((p) => p.i === 'battery')!.h, CARD_SPEC.battery.h + ROW_GAP)
+  eq('so is one stored as enormous', staleHeights.find((p) => p.i === 'location')!.h, CARD_SPEC.location.h + ROW_GAP)
+
+  // Switching between the phone and the desktop must not cost the arrangement.
+  const authored = DEFAULT_LAYOUT
+  const fitted = fitToColumns(authored, 1)
+  eq('a narrow screen shows one card deep', new Set(fitted.map((p) => p.x)).size, 1)
+  const fromNarrow = commitReport(fitted, authored, 1)
+  eq('a change on a narrow screen keeps every card at its authored width', fromNarrow.map((p) => `${p.i}:${p.w}`).sort(), authored.map((p) => `${p.i}:${p.w}`).sort())
+  eq('and at its authored height', fromNarrow.map((p) => `${p.i}:${p.h}`).sort(), authored.map((p) => `${p.i}:${p.h}`).sort())
+  eq('and the same top-to-bottom order', fromNarrow.map((p) => p.i), authored.map((p) => p.i))
+  eq('doing it again changes nothing', commitReport(fitToColumns(fromNarrow, 1), fromNarrow, 1), fromNarrow)
+  // Moving the first card past the second on the phone must show up on the desktop. The grid
+  // reports a reorder as new rows, not as a shuffled array, so the fixture says so too.
+  const swapped = commitReport(fitted.map((p, index) => ({ ...p, y: index === 0 ? 9000 : index === 1 ? 0 : p.y })), authored, 1)
+  eq('a reorder on the phone is remembered', [swapped.find((p) => p.i === 'vehicle')!.y > swapped.find((p) => p.i === 'realtime')!.y, swapped.find((p) => p.i === 'vehicle')!.w], [true, 2])
+  eq('a desktop report is taken at face value', commitReport(authored, authored, 4), authored)
+
+  eq('storage keeps the geometry', Object.keys(toStorage(DEFAULT_LAYOUT)[0]).sort(), ['h', 'i', 'w', 'x', 'y'])
+  eq('the storage key is namespaced', LAYOUT_STORAGE_KEY, 'drive-scope:dashboard-layout')
+
+  const gridSource = readFileSync('components/dashboard/dashboard-grid.tsx', 'utf8')
+  check('the grid is react-grid-layout', gridSource.includes("from 'react-grid-layout'") && gridSource.includes('GridLayout'))
+  check('the grid stylesheet is imported', gridSource.includes("import 'react-grid-layout/css/styles.css'"))
+  check('a drag starts on the card header', gridSource.includes("'.dash-head'") && gridSource.includes('handle: DRAG_HANDLE'))
+  check('cards cannot be resized at all', gridSource.includes('resizeConfig={{ enabled: false }}') && gridSource.includes('isResizable: false'))
+  check('the arrangement is written when the card is let go, not on every report', gridSource.includes('onDragStop={commit}') && !gridSource.includes('onLayoutChange'))
+  check('every card is measured from its own content', gridSource.includes('ResizeObserver') && gridSource.includes('.dash-stack'))
+  // The box has to fit the content *and* the card's padding. Measuring only the content is
+  // what made every card 32px too short and clipped the bottom of every figure in view.
+  check('the measurement includes the card padding', gridSource.includes('paddingTop') && gridSource.includes('paddingBottom'))
+  check('the responsive mode that overwrites the arrangement is not used', !gridSource.includes('ResponsiveGridLayout'))
+  check('children are ordered independently of the layout', gridSource.includes('DASHBOARD_CARDS.map((id) =>'))
+  check('a redundant layout report does not write storage', readFileSync('lib/hooks/use-dashboard-layout.ts', 'utf8').includes('=== json) return'))
+  const css = readFileSync('app/globals.css', 'utf8')
+  check('the drag band opts out of touch scrolling', /\.dash-head\s*\{[^}]*touch-action:\s*none/.test(css))
+  check('the card fills the box it is given', /\.dash-measure\s*\{[^}]*height: 100%/.test(css))
+  check('content cannot be drawn outside the card', /dash-card flex h-full flex-col overflow-hidden/.test(readFileSync('components/dashboard/cards.tsx', 'utf8')))
+  check('the measured stack cannot shrink into the box', /dash-stack shrink-0 grow-0/.test(readFileSync('components/dashboard/cards.tsx', 'utf8')))
+  check('the corner the library still renders is hidden, not merely unstyled', /\.react-grid-item > \.react-resizable-handle\s*\{[^}]*display: none !important/.test(css))
+  check("the library's placeholder is restyled", /react-grid-placeholder\s*\{[^}]*background: var\(--surface-muted\)/.test(css))
+}
+
+// ── Shipped rasters: the card art and the install icons ────────────────────
+//
+// These read the files that actually go over the wire rather than the code that made them,
+// because every defect found here was a build script that ran successfully and produced a
+// wrong image.
+
+/** The transparent margin around an RGBA raster, which is what a bad crop leaves behind. */
+function alphaBoundsOf(data: Uint8Array, info: { width: number; height: number; channels: number }) {
+  const { width, height, channels } = info
+  let left = -1
+  let right = -1
+  let top = -1
+  let bottom = -1
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * channels + 3] <= 6) continue
+      if (left === -1 || x < left) left = x
+      if (x > right) right = x
+      if (top === -1 || y < top) top = y
+      if (y > bottom) bottom = y
+    }
+  }
+  return { top, bottomMargin: height - 1 - bottom, left, rightMargin: width - 1 - right }
+}
+
+/**
+ * Mean luminance per alpha band, which is where a background-removal halo shows up: the
+ * outer pixels are mostly transparent, so they are invisible on a light surface and loud on
+ * a dark one, and nothing about the file looks wrong to an encoder.
+ */
+function edgeBands(data: Uint8Array, info: { width: number; height: number; channels: number }) {
+  const sums = new Map<string, [number, number]>()
+  let opaque: [number, number] = [0, 0]
+  const band = (a: number) => (a === 0 ? null : a >= 250 ? 'opaque' : a < 40 ? 'a<40' : a < 128 ? '40-127' : a < 200 ? '128-199' : '200-249')
+  for (let i = 0; i < info.width * info.height; i++) {
+    const a = data[i * info.channels + 3]
+    const key = band(a)
+    if (!key) continue
+    const l = 0.2126 * data[i * info.channels] + 0.7152 * data[i * info.channels + 1] + 0.0722 * data[i * info.channels + 2]
+    const target = key === 'opaque' ? opaque : sums.get(key) ?? [0, 0]
+    target[0] += l
+    target[1] += 1
+    if (key !== 'opaque') sums.set(key, target)
+  }
+  const mean = ([s, n]: [number, number]) => (n ? Math.round((s / n) * 10) / 10 : 0)
+  const bands = Object.fromEntries([...sums.entries()].map(([k, v]) => [k, mean(v)]))
+  return { ...bands, opaque: mean(opaque), worstPartial: Math.max(0, ...Object.values(bands)) }
+}
+
+{
+  const sharp = (await import('sharp')).default
+
+  // 1. The card art. The <img> carries explicit width/height so the browser reserves the
+  //    box before the bytes arrive; those numbers are only honest if they are the file's
+  //    real pixels, and they had drifted (345 declared against a 340px-tall asset).
+  const card = 'public/vehicle/model-y.webp'
+  check('the card art is shipped', existsSync(card))
+  const artMeta = await sharp(card).metadata()
+  const imgTag = readFileSync('components/dashboard/status-cards.tsx', 'utf8')
+  const declared = imgTag.match(/width=\{(\d+)\}\s*\n\s*height=\{(\d+)\}/)?.slice(1, 3).map(Number)
+  eq("the <img> declares the asset's real size", declared, [artMeta.width, artMeta.height])
+
+  // 2. The crop. The bounding box is computed from the alpha channel, and the function
+  //    returned the largest *x* as `bottom` — so the crop ran to the foot of the frame and
+  //    the shipped image carried a 90px dead band under the car against 24px above it.
+  check('alphaBounds returns the bottom edge, not the right edge again', !/bottom:\s*max\b/.test(readFileSync('scripts/build-assets.mjs', 'utf8')))
+  const artRaw = await sharp(card).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const artBox = alphaBoundsOf(artRaw.data, artRaw.info)
+  check('the car is centred in its frame, not sitting on dead space', Math.abs(artBox.top - artBox.bottomMargin) <= 4, `top=${artBox.top} bottom=${artBox.bottomMargin}`)
+
+  // 3. The fringe. The illustration was cut out of a white background by a tool that left
+  //    the white in the semi-transparent edge pixels, which composites as a bright outline
+  //    on the dark card. Measured before the fix: 243 and 218 in the two outermost bands.
+  const edge = edgeBands(artRaw.data, artRaw.info)
+  check('the alpha edge carries the car, not the removed background', edge.worstPartial <= 140, `brightest semi-transparent band is ${edge.worstPartial}, body averages ${edge.opaque}`)
+  check('the build decontaminates before it resizes', /defringe\(raw\.data/.test(readFileSync('scripts/build-assets.mjs', 'utf8')))
+
+  // 4. The icons. Anything the manifest or the <head> names has to exist and be decodable.
+  const manifest = (await import('../app/manifest.ts')).default()
+  const layoutSource = readFileSync('app/layout.tsx', 'utf8')
+  const named = [
+    ...manifest.icons.map((icon) => icon.src),
+    ...(layoutSource.match(/\/icons\/[a-z0-9-]+\.png/g) ?? []),
+    'app/favicon.ico',
+  ]
+  for (const file of new Set(named)) {
+    const path = file.startsWith('/') ? `public${file}` : file
+    check(`the icon the page names exists: ${path}`, existsSync(path))
+  }
+
+  // iOS composites a home-screen icon over black, so a transparent pixel in the touch icon
+  // is a black hole in the finished tile rather than the tile's own colour.
+  const touch = await sharp('public/icons/apple-touch-icon.png').ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const touchOpaque = Array.from({ length: touch.info.width * touch.info.height }, (_, i) => touch.data[i * 4 + 3]).every((a) => a === 255)
+  check('the touch icon is fully opaque', touchOpaque)
+
+  // 5. The .ico is hand-written (this sharp build has no ICO encoder), so the container is
+  //    checked the way a browser reads it: the directory against the payloads behind it.
+  const ico = readFileSync('app/favicon.ico')
+  eq('the .ico header declares an icon, not a cursor', ico.readUInt16LE(2), 1)
+  const frames = ico.readUInt16LE(4)
+  check('the .ico carries several densities', frames >= 3, `${frames} frames`)
+  let endOfLast = 0
+  for (let i = 0; i < frames; i++) {
+    const at = 6 + i * 16
+    const declaredW = ico[at] || 256
+    const declaredH = ico[at + 1] || 256
+    const length = ico.readUInt32LE(at + 8)
+    const offset = ico.readUInt32LE(at + 12)
+    const decoded = await sharp(ico.subarray(offset, offset + length)).metadata()
+    eq(`frame ${i} is the size its directory entry claims (${declaredW}x${declaredH})`, [decoded.width, decoded.height], [declaredW, declaredH])
+    endOfLast = Math.max(endOfLast, offset + length)
+  }
+  eq('the .ico has no trailing bytes', ico.length, endOfLast)
+
+  // 6. Install behaviour. The colours are asserted equal across three files because the
+  //    comment in app/manifest.ts claims the launch screen and the icon are one object, and
+  //    a mismatch is a visible flash of the wrong colour at every cold start.
+  const assets = readFileSync('scripts/build-assets.mjs', 'utf8')
+  const tileBottom = assets.match(/TILE_BOTTOM = '(#[0-9a-f]{6})'/)?.[1]
+  check('the tile colour is readable from the build', typeof tileBottom === 'string', String(tileBottom))
+  eq('the manifest launches standalone', manifest.display, 'standalone')
+  eq('the installed app starts at the dashboard', [manifest.start_url, manifest.scope, manifest.id], ['/', '/', '/'])
+  eq('theme colour is the manifest, and the tile bottom', [manifest.theme_color, manifest.background_color], [tileBottom, tileBottom])
+  check('the viewport colour matches the tile it sits behind', layoutSource.includes(`themeColor: '${tileBottom}'`))
+  check('a maskable icon is offered separately from the whole one', manifest.icons.some((icon) => icon.purpose === 'maskable') && manifest.icons.some((icon) => !icon.purpose))
+  check('the page asks iOS to open it as an app', /apple-mobile-web-app-capable"\s+content="yes"/.test(layoutSource) && layoutSource.includes('capable: true'))
+  check('the layout runs edge to edge so the safe-area padding is live', layoutSource.includes("viewportFit: 'cover'"))
+  check('the shell pays for the status bar it now runs under', readFileSync('components/shell/app-shell.tsx', 'utf8').includes('env(safe-area-inset-top)'))
+
+  // 7. The trap that broke the map: a file the browser fetches without a session must not
+  //    be redirected to /login, and unlike the map this fails silently — iOS just installs
+  //    a bookmark and says nothing.
+  const proxySource = readFileSync('proxy.ts', 'utf8')
+  check('the manifest is fetched without a session', proxySource.includes("'/manifest.webmanifest'"))
+  check('the icon set is fetched without a session', proxySource.includes("'/icons/'"))
+}
+
+// ── Door/window state, and the unit conversions the new cards depend on ─────
+{
+  const bare = normalizeVehicleState({})
+  eq('no door fields means no door record', bare.doors, null)
+  eq('no window fields means no window record', bare.windows, null)
+
+  const mixed = normalizeVehicleState({ df: 1, pf: 0, fd_window: 0, fp_window: 1 })
+  eq('df is the driver-side front door', mixed.doors?.driverFront, true)
+  eq('pf is the passenger-side front door', mixed.doors?.passengerFront, false)
+  eq('an unreported door stays unknown', mixed.doors?.driverRear, null)
+  eq('fd_window=0 is closed, not absent', mixed.windows?.frontDriver, false)
+  eq('fp_window=1 is lowered', mixed.windows?.frontPassenger, true)
+  eq('one open part makes the group open', anyPartOpen(mixed.doors), true)
+  eq('all-closed reads as closed', anyPartOpen({ driverFront: false, driverRear: null } as never), false)
+  eq('an all-null group is unknown, not closed', anyPartOpen({ driverFront: null, driverRear: null } as never), null)
+  // Snapshots are stored as JSON, so a row written before these fields existed has no key.
+  eq('a stored row without the field is unknown', anyPartOpen(undefined), null)
+
+  eq('42 psi is 2.9 bar', formatBar(42), '2.9 bar')
+  eq('no reading is a dash, not zero', formatBar(null), '—')
+  eq('178 Wh/km is 17.8 kWh/100 km', formatKwhPer100Km(178), '17.8 kWh/100 km')
 }
 
 console.log(`\n  ${passed} checks passed`)
