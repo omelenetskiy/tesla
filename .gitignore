@@ -32,3 +32,6 @@ keys/
 .cursor
 .agents
 .qwen
+
+# Local Netlify folder
+.netlify
