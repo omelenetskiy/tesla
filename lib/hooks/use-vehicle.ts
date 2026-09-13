@@ -35,6 +35,16 @@ export type VehicleFeed = {
   refresh: (options?: { mayWake?: boolean }) => Promise<void>
 }
 
+async function parseJsonSafe(response: Response): Promise<unknown | null> {
+  const body = await response.text()
+  if (!body.trim()) return null
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw new Error('The app returned an invalid response. Please refresh and try again.')
+  }
+}
+
 export function useVehicleData(): VehicleFeed {
   const [snapshot, setSnapshot] = React.useState<VehicleStatusSnapshot | null>(null)
   const [vehicles, setVehicles] = React.useState<VehicleSummary[]>([])
@@ -70,22 +80,32 @@ export function useVehicleData(): VehicleFeed {
         setRefreshing(false)
         return
       }
-      const payload = (await response.json()) as {
+
+      const payload = (await parseJsonSafe(response)) as {
         snapshot?: VehicleStatusSnapshot
         vehicles?: VehicleSummary[]
         selectedVehicleId?: string | null
         needsConnection?: boolean
         message?: string | null
+      } | null
+
+      if (!response.ok) {
+        const message = payload?.snapshot?.error?.message ?? `Request failed with status ${response.status}`
+        setError({ kind: 'network', status: response.status, endpoint: '/api/vehicle', message, attempts: 1, retryAfterMs: null })
+        setLoading(false)
+        setRefreshing(false)
+        return
       }
-      if (payload.snapshot) setSnapshot(payload.snapshot)
-      if (payload.vehicles) setVehicles(payload.vehicles)
-      if (payload.selectedVehicleId) {
+
+      if (payload?.snapshot) setSnapshot(payload.snapshot)
+      if (payload?.vehicles) setVehicles(payload.vehicles)
+      if (payload?.selectedVehicleId) {
         setSelectedVehicleId((current) => current ?? payload.selectedVehicleId ?? null)
         selectedVehicleIdRef.current = selectedVehicleIdRef.current ?? payload.selectedVehicleId ?? null
       }
-      setNeedsConnection(Boolean(payload.needsConnection))
-      setMessage(payload.message ?? null)
-      setError(payload.snapshot?.error ?? null)
+      setNeedsConnection(Boolean(payload?.needsConnection))
+      setMessage(payload?.message ?? null)
+      setError(payload?.snapshot?.error ?? null)
       setLoading(false)
       setRefreshing(false)
     } catch (fetchError) {
@@ -111,7 +131,6 @@ export function useVehicleData(): VehicleFeed {
       await load()
     })()
   }, [load])
-
 
   const selectVehicle = React.useCallback((id: string) => {
     selectedVehicleIdRef.current = id

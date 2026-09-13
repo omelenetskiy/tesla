@@ -2,7 +2,7 @@ import { getSupabaseAdmin } from '@/lib/supabase'
 import { TeslaClient, type TeslaRequestLogInput } from './client'
 import { teslaConfig } from './config'
 import { TeslaApiError, describeTeslaError, toPublicError } from './errors'
-import { resolveOwnerApiId } from './identity'
+import { resolveVehicleTagId } from './identity'
 import type { VehicleStatus, VehicleStatusSnapshot, VehicleSummary } from './models'
 import { normalizeVehicleStatus, deriveModel, type RawMergedVehicle, type RawVehicleListItem } from './normalize'
 import { policyFor, resolvePollingProfile, shouldCollect } from './provider'
@@ -24,7 +24,7 @@ export type VehicleRow = {
   collection_mode: string | null
   polling_profile: string | null
   /** Added by migration 004; the short `{id}` vs long `vehicle_id` split (plan E2). */
-  owner_api_id?: string | null
+  vehicle_tag_id?: string | null
   vehicle_id?: string | null
   distance_unit?: string | null
   vin?: string | null
@@ -33,15 +33,15 @@ export type VehicleRow = {
 }
 
 const VEHICLE_COLUMNS = 'id, owner_id, provider_vehicle_id, display_name, model, collection_mode, is_active, created_at'
-const VEHICLE_COLUMNS_EXTENDED = `${VEHICLE_COLUMNS}, polling_profile, owner_api_id, vehicle_id, distance_unit, vin`
+const VEHICLE_COLUMNS_EXTENDED = `${VEHICLE_COLUMNS}, polling_profile, vehicle_tag_id, vehicle_id, distance_unit, vin`
 
 /**
  * `{id}` resolution lives in `lib/tesla/identity.ts` so the rule itself is testable
  * without a database. `null` means the short id is genuinely unknown for this row, and
  * the caller has to obtain it from the vehicle list rather than guess.
  */
-function ownerApiIdOf(row: VehicleRow): string | null {
-  return resolveOwnerApiId(row)
+function vehicleTagIdOf(row: VehicleRow): string | null {
+  return resolveVehicleTagId(row)
 }
 
 export async function listVehicleRows(ownerId: string): Promise<VehicleRow[]> {
@@ -53,16 +53,7 @@ export async function listVehicleRows(ownerId: string): Promise<VehicleRow[]> {
     .eq('is_active', true)
     .order('created_at', { ascending: true })
   if (error) {
-    // The extended column list only exists after migration 004. Falling back keeps
-    // the app usable for a deployment that has not applied it yet.
-    const fallback = await supabase
-      .from('vehicles')
-      .select(VEHICLE_COLUMNS)
-      .eq('owner_id', ownerId)
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-    if (fallback.error) throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${fallback.error.message}`)
-    return (fallback.data ?? []) as VehicleRow[]
+    throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${error.message}`)
   }
   return (data ?? []) as VehicleRow[]
 }
@@ -76,13 +67,7 @@ export async function listAllVehicleRows(): Promise<VehicleRow[]> {
     .eq('is_active', true)
     .order('created_at', { ascending: true })
   if (error) {
-    const fallback = await supabase
-      .from('vehicles')
-      .select(VEHICLE_COLUMNS)
-      .eq('is_active', true)
-      .order('created_at', { ascending: true })
-    if (fallback.error) throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${fallback.error.message}`)
-    return (fallback.data ?? []) as VehicleRow[]
+    throw new TeslaApiError('unknown', `Failed to read the vehicle list: ${error.message}`)
   }
   return (data ?? []) as VehicleRow[]
 }
@@ -121,7 +106,7 @@ export async function listVehicleSummaries(ownerId: string): Promise<VehicleSumm
       return {
         identity: {
           databaseId: row.id,
-          ownerApiId: ownerApiIdOf(row) ?? '',
+          vehicleTagId: vehicleTagIdOf(row) ?? '',
           vehicleId: row.vehicle_id ?? null,
           ownerIdString: null,
           vin: row.vin ?? null,
@@ -220,9 +205,9 @@ export async function readVehicleStatus(input: {
 
   const client = buildTeslaClient(row)
   try {
-    const shortId = ownerApiIdOf(row) ?? (await recoverOwnerApiId(client, row))
+    const shortId = vehicleTagIdOf(row) ?? (await recoverVehicleTagId(client, row))
     if (!shortId) {
-      throw new TeslaApiError('not_found', 'Tesla has not given this app a short vehicle id for Fleet state calls, so no state endpoint can be addressed. Reconnect the vehicle to refresh its identifiers.', { endpoint: '/api/1/vehicles/:id', method: 'GET' })
+      throw new TeslaApiError('not_found', 'Tesla has not given this app a valid Fleet vehicle tag, so no state endpoint can be addressed. Reconnect the vehicle to refresh identifiers.', { endpoint: '/api/1/vehicles/:id', method: 'GET' })
     }
     const { status, telemetryCollected } = await client.getVehicleStatus(shortId, { vehicleId: row.id })
     const collectedAt = new Date().toISOString()
@@ -263,15 +248,7 @@ export async function persistSnapshot(row: VehicleRow, status: VehicleStatus, co
     longitude: status.drive.longitude,
     collected_at: collectedAt,
   })
-  if (error) {
-    // Old rows reject unknown columns; retry with the shape migration 001 allows.
-    const fallback = await supabase.from('vehicle_states').insert({
-      vehicle_id: row.id,
-      provider_vehicle_id: row.provider_vehicle_id,
-      state: status,
-    })
-    if (fallback.error) throw new TeslaApiError('unknown', `Failed to save the snapshot: ${fallback.error.message}`)
-  }
+  if (error) throw new TeslaApiError('unknown', `Failed to save the snapshot: ${error.message}`)
   await supabase.from('collection_events').insert({
     vehicle_id: row.id,
     owner_id: row.owner_id,
@@ -294,7 +271,7 @@ async function logCollectionFailure(row: VehicleRow, error: unknown) {
 }
 
 /**
- * A row created before the `owner_api_id` column existed has no short id, and every
+ * A row created before the `vehicle_tag_id` column existed has no short id, and every
  * state path needs one. `GET /api/1/vehicles` requires no id itself, so it can supply
  * it: the value is written back and returned, which turns a permanently dead row into a
  * self-healing one instead of a doomed call against the long id.
@@ -302,7 +279,7 @@ async function logCollectionFailure(row: VehicleRow, error: unknown) {
  * Errors are deliberately not caught here — a failing list call is the real diagnosis
  * (expired token, gated API) and the caller surfaces it.
  */
-async function recoverOwnerApiId(client: TeslaClient, row: VehicleRow): Promise<string | null> {
+async function recoverVehicleTagId(client: TeslaClient, row: VehicleRow): Promise<string | null> {
   const list = await client.getVehicles({ vehicleId: row.id, requestType: 'vehicle_list', noCache: true })
   const match =
     list.find((entry) =>
@@ -312,8 +289,8 @@ async function recoverOwnerApiId(client: TeslaClient, row: VehicleRow): Promise<
   if (!match) return null
   const shortId = match.id_s !== undefined && match.id_s !== null ? String(match.id_s) : match.id !== undefined && match.id !== null ? String(match.id) : null
   if (!shortId) return null
-  const { error } = await getSupabaseAdmin().from('vehicles').update({ owner_api_id: shortId }).eq('id', row.id)
-  if (error) console.error('[tesla] recovered the owner api id but could not store it', error.message)
+  const { error } = await getSupabaseAdmin().from('vehicles').update({ vehicle_tag_id: shortId }).eq('id', row.id)
+  if (error) console.error('[tesla] recovered the vehicle tag but could not store it', error.message)
   return shortId
 }
 
@@ -322,7 +299,7 @@ async function recoverOwnerApiId(client: TeslaClient, row: VehicleRow): Promise<
  * the previous code stored `vehicles[0]` and made multi-vehicle impossible.
  *
  * This is also where the plan-E2 repair happens: `id_s`/`id` are written to
- * `owner_api_id` and the long `vehicle_id` to `vehicle_id`, so the short id used in
+ * `vehicle_tag_id` and the long `vehicle_id` to `vehicle_id`, so the short id used in
  * path segments stops being confused with the streaming identity.
  */
 export async function syncVehiclesFromList(ownerId: string, list: RawVehicleListItem[]): Promise<{ count: number; vehicles: VehicleRow[] }> {
@@ -336,7 +313,7 @@ export async function syncVehiclesFromList(ownerId: string, list: RawVehicleList
       {
         owner_id: ownerId,
         provider_vehicle_id: providerVehicleId,
-        owner_api_id: shortId,
+        vehicle_tag_id: shortId,
         vehicle_id: longId,
         vin: entry.vin ?? null,
         display_name: entry.display_name ?? entry.alias ?? 'Tesla',
@@ -344,14 +321,7 @@ export async function syncVehiclesFromList(ownerId: string, list: RawVehicleList
       },
       { onConflict: 'owner_id,provider_vehicle_id' },
     )
-    // Older schema has no owner_api_id column: retry with what exists so the
-    // connection still succeeds before migration 004 is applied.
-    if (error && /owner_api_id|column|Could not find/i.test(error.message)) {
-      await supabase.from('vehicles').upsert(
-        { owner_id: ownerId, provider_vehicle_id: providerVehicleId, display_name: entry.display_name ?? entry.alias ?? 'Tesla', model: deriveModel(entry.vin, entry.display_name, entry.model) },
-        { onConflict: 'owner_id,provider_vehicle_id' },
-      )
-    }
+    if (error) throw new TeslaApiError('unknown', `Failed to sync vehicle identifiers: ${error.message}`)
   }
   return { count: list.length, vehicles: await listVehicleRows(ownerId) }
 }
@@ -361,7 +331,7 @@ export async function syncVehiclesFromList(ownerId: string, list: RawVehicleList
  * Bypasses the cache on purpose: a diagnostic that returns a memoised answer is
  * worse than no diagnostic.
  */
-export async function probeOwnerApi(row: VehicleRow) {
+export async function probeFleetApi(row: VehicleRow) {
   const startedAt = Date.now()
   try {
     const client = buildTeslaClient(row)

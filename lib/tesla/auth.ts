@@ -135,7 +135,7 @@ export function isAccessTokenValid(accessToken: string, skewMs = teslaConfig.exp
  * pinning only its auth pool to `[:http1, :http2]` + `tlsv1.3` (PR #5406, "fix:
  * enable HTTP/2 and set TLS to 1.3 for TESLA_AUTH_HOST") and kept using the Owner
  * API for individual accounts — its `TESLA_API_HOST` pool carries no such
- * requirement, and its docs still state "Individual users: the legacy API is
+ * requirement, and its docs still state "Individual users: the Fleet API is
  * currently still accessible".
  *
  * Node's global fetch is undici and cannot negotiate HTTP/2, so the auth host gets a

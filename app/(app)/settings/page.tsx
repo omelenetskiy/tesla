@@ -163,7 +163,7 @@ export default function SettingsPage() {
 /**
  * The Tesla account card. One button, one direction.
  *
- * There is no token-paste form any more. It belonged to the legacy API flow, where the native
+ * There is no token-paste form any more. It belonged to the Fleet API flow, where the native
  * `ownerapi` client could only echo a code to Tesla's own callback and a desktop app had to
  * mint the pair; the Fleet flow has a real registered redirect URI, so the whole second
  * form was an artifact of a transport we no longer use — and it read as "log in twice".

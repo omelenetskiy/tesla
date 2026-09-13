@@ -515,12 +515,12 @@ export function deriveModel(vin: string | null | undefined, displayName?: string
 }
 
 export function buildIdentity(raw: RawMergedVehicle, overrideOwnerApiId?: string | number): VehicleIdentity {
-  const ownerApiId = overrideOwnerApiId !== undefined
+  const vehicleTagId = overrideOwnerApiId !== undefined
     ? String(overrideOwnerApiId)
     : str(raw.id_s) ?? (raw.id !== undefined ? String(raw.id) : '')
   return {
     databaseId: '',
-    ownerApiId,
+    vehicleTagId,
     vehicleId: raw.vehicle_id !== undefined ? String(raw.vehicle_id) : null,
     ownerIdString: str(raw.id_s),
     vin: str(raw.vin),

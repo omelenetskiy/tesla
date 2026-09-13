@@ -41,10 +41,16 @@ export default function DashboardPage() {
   React.useEffect(() => {
     let cancelled = false
     void (async () => {
-      const response = await fetch('/api/history?range=30d', { cache: 'no-store' })
-      if (!response.ok) return
-      const payload = (await response.json()) as { history?: { trips?: Trip[] } }
-      if (!cancelled) setTrips(payload.history?.trips ?? [])
+      try {
+        const response = await fetch('/api/history?range=30d', { cache: 'no-store' })
+        if (!response.ok) return
+        const body = await response.text()
+        if (!body.trim()) return
+        const payload = JSON.parse(body) as { history?: { trips?: Trip[] } }
+        if (!cancelled) setTrips(payload.history?.trips ?? [])
+      } catch {
+        // Keep dashboard usable when history payload is temporarily unavailable.
+      }
     })()
     return () => {
       cancelled = true
