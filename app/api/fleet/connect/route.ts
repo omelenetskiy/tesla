@@ -6,6 +6,18 @@ import { FleetConfigError, fleetConfig } from '@/lib/fleet/config'
 
 export const dynamic = 'force-dynamic'
 
+function toAppUrl(path: string, request: Request) {
+  const canonical = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (canonical) {
+    try {
+      return new URL(path, canonical)
+    } catch {
+      // Fall back to request host when NEXT_PUBLIC_APP_URL is malformed.
+    }
+  }
+  return new URL(path, request.url)
+}
+
 /**
  * Fleet owner authorization (§P1).
  *
@@ -19,7 +31,7 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
-  if (!user) return NextResponse.redirect(new URL('/login', request.url))
+  if (!user) return NextResponse.redirect(toAppUrl('/login', request))
 
   let config
   try {
@@ -27,14 +39,14 @@ export async function GET(request: Request) {
   } catch (error) {
     const reason = error instanceof FleetConfigError ? 'not-configured' : 'config-error'
     const detail = error instanceof Error ? encodeURIComponent(error.message.slice(0, 200)) : ''
-    return NextResponse.redirect(new URL(`/tesla-login?fleet=error&reason=${reason}${detail ? `&detail=${detail}` : ''}`, request.url))
+    return NextResponse.redirect(toAppUrl(`/tesla-login?fleet=error&reason=${reason}${detail ? `&detail=${detail}` : ''}`, request))
   }
 
   // Refuse before sending the user to Tesla, not after. With a stale redirect URI the flow
   // *looks* successful — Tesla authorizes, redirects, and the one-time code dies on a 404
   // that this app never sees. The code cannot be replayed, so every attempt is wasted.
   if (config.redirectPathWarning) {
-    return NextResponse.redirect(new URL(`/tesla-login?fleet=error&reason=wrong-callback-path&detail=${encodeURIComponent(config.redirectPathWarning)}`, request.url))
+    return NextResponse.redirect(toAppUrl(`/tesla-login?fleet=error&reason=wrong-callback-path&detail=${encodeURIComponent(config.redirectPathWarning)}`, request))
   }
 
   const authorization = createAuthorizationRequest()

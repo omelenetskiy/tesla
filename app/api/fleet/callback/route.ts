@@ -12,9 +12,21 @@ type PendingAuthorization = { state?: string; nonce?: string; userId?: string; c
 
 const MAX_AGE_MS = 10 * 60_000
 
+function toAppUrl(path: string, request: NextRequest) {
+  const canonical = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (canonical) {
+    try {
+      return new URL(path, canonical)
+    } catch {
+      // Fall back to request host when NEXT_PUBLIC_APP_URL is malformed.
+    }
+  }
+  return new URL(path, request.url)
+}
+
 function failure(request: NextRequest, reason: string, detail?: string) {
   const suffix = detail ? `&detail=${encodeURIComponent(detail.slice(0, 200))}` : ''
-  return NextResponse.redirect(new URL(`/tesla-login?fleet=error&reason=${reason}${suffix}`, request.url))
+  return NextResponse.redirect(toAppUrl(`/tesla-login?fleet=error&reason=${reason}${suffix}`, request))
 }
 
 export async function GET(request: NextRequest) {
@@ -58,7 +70,7 @@ export async function GET(request: NextRequest) {
   try {
     const tokenSet = await exchangeAuthorizationCode({ code }, config)
     const saved = await saveFleetTokenSet({ ownerId: user.id, tokenSet, config })
-    const response = NextResponse.redirect(new URL(`/tesla-login?fleet=connected&scopes=${encodeURIComponent((saved.scopes ?? []).join(','))}`, request.url))
+    const response = NextResponse.redirect(toAppUrl(`/tesla-login?fleet=connected&scopes=${encodeURIComponent((saved.scopes ?? []).join(','))}`, request))
     response.cookies.set('fleet_authorized', '1', {
       httpOnly: true,
       sameSite: 'lax',

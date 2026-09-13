@@ -1,6 +1,18 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+function toAppUrl(path: string, request: NextRequest) {
+  const canonical = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (canonical) {
+    try {
+      return new URL(path, canonical)
+    } catch {
+      // Fall back to the incoming host when NEXT_PUBLIC_APP_URL is malformed.
+    }
+  }
+  return new URL(path, request.url)
+}
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
   const supabase = createServerClient(
@@ -37,7 +49,7 @@ export async function proxy(request: NextRequest) {
     path === '/manifest.webmanifest'
 
   if (!user && !isPublic) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return NextResponse.redirect(toAppUrl('/login', request))
   }
 
   const fleetAuthorized = request.cookies.get('fleet_authorized')?.value === '1'
@@ -49,15 +61,15 @@ export async function proxy(request: NextRequest) {
     path.startsWith('/api/fleet/')
 
   if (user && !isPublic && !isApi && !canConnectFleet && !fleetAuthorized) {
-    return NextResponse.redirect(new URL('/tesla-login?fleet=required', request.url))
+    return NextResponse.redirect(toAppUrl('/tesla-login?fleet=required', request))
   }
 
   if (user && path === '/login') {
-    return NextResponse.redirect(new URL(fleetAuthorized ? '/' : '/tesla-login?fleet=required', request.url))
+    return NextResponse.redirect(toAppUrl(fleetAuthorized ? '/' : '/tesla-login?fleet=required', request))
   }
 
   if (user && path === '/tesla-login' && fleetAuthorized) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return NextResponse.redirect(toAppUrl('/', request))
   }
 
   return response
