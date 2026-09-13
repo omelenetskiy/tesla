@@ -41,7 +41,7 @@ function integerEnv(name: string, fallback: number, min: number, max: number) {
   return Math.min(max, Math.max(min, parsed))
 }
 
-// TESLA_API_BASE_URL is the legacy variable; TESLA_API_HOST is the documented one.
+// TESLA_API_BASE_URL is a compatibility variable; TESLA_API_HOST is the documented one.
 const apiHost = normalizeHost(env('TESLA_API_HOST') ?? hostFromUrl(env('TESLA_API_BASE_URL')), 'owner-api.teslamotors.com')
 const authHost = normalizeHost(env('TESLA_AUTH_HOST'), GLOBAL_AUTH_HOST)
 const authPath = normalizePath(env('TESLA_AUTH_PATH'), '/oauth2/v3')

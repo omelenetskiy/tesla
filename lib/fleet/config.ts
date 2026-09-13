@@ -4,10 +4,10 @@
  * Every host, path and scope string here is quoted verbatim in
  * `docs/TESLA_FLEET_MIGRATION_PLAN.md` §4a. Nothing in this file is inferred, and anything
  * that is not pinned there (userinfo, telemetry config, commands) deliberately does not
- * appear here at all — an unpinned path in a config file is how the legacy build ended
+ * appear here at all — an unpinned path in a config file is how the previous build ended
  * up requesting `/oauth2/v3/oauth2/v3/token` for two weeks.
  *
- * Two deliberate breaks from the legacy layer:
+ * Two deliberate breaks from the previous layer:
  *  - the token host is `fleet-auth.prd.vn.cloud.tesla.com`, **not** `auth.tesla.com`. The
  *    docs make that mandatory: "calls to `/token` must use the
  *    fleet-auth.prd.vn.cloud.tesla.com domain as these calls can come from application

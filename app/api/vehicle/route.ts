@@ -11,8 +11,8 @@ export const dynamic = 'force-dynamic'
  * GET /api/vehicle — the dashboard's single read.
  *
  * Fleet first: when the account holds a Fleet token, this route *is* the startup data path,
- * and it creates the vehicle row on the way through. The legacy branch below stays only
- * until P6 removes it, so a deployment that has not re-authorized yet still shows something.
+ * and it creates the vehicle row on the way through. The compatibility branch below stays
+ * only until P6 removes it, so a deployment that has not re-authorized yet still shows something.
  */
 export async function GET(request: Request) {
   const user = await getAuthenticatedUser()
@@ -37,8 +37,8 @@ export async function GET(request: Request) {
     return response
   }
 
-  // Not resolveVehicle: that returns the oldest row, which on a previously-Owner-API
-  // account is the legacy one with no addressable identifier.
+  // Not resolveVehicle: that returns the oldest row, which on previously connected
+  // accounts can be a row with no addressable identifier.
   let row = pickFleetRow(await listVehicleRows(user.id), requestedVehicleId)
   if (!row || !fleetVehicleTag(row)) {
     const bootstrap = buildFleetClient(user.id)

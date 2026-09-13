@@ -17,7 +17,7 @@ import { classifyStatus, parseRetryAfter, isRefreshEligible, retryDelayMs, Tesla
 import { redactJsonText, redactText, sanitizeHeaders, sanitizeUrl } from '../lib/tesla/sanitize.ts'
 import { deriveModel, derivePresence, freshnessFor, isVehicleAwake, milesToKm, normalizeChargeState, normalizeVehicleStatus, normalizeVehicleState } from '../lib/tesla/normalize.ts'
 import { authBaseForHost, authBaseForIssuer, teslaConfig } from '../lib/tesla/config.ts'
-import { resolveOwnerApiId } from '../lib/tesla/identity.ts'
+import { resolveVehicleTagId } from '../lib/tesla/identity.ts'
 import { createFleetConfig, normaliseFleetRegion, consentRevokeUrl, FLEET_SCOPES, FLEET_CALLBACK_PATH } from '../lib/fleet/config.ts'
 import { assertUsableVehicleTag, fleetVehicleTag } from '../lib/fleet/client.ts'
 import { PUBLIC_KEY_WELL_KNOWN_PATH, fingerprint, hostnameMatchesAppDomain, loadPrivateKey, publicKeyPemFromPrivate, rootDomain } from '../lib/fleet/keys.ts'
@@ -122,7 +122,7 @@ const status = normalizeVehicleStatus({
   vehicle_state: { odometer: 1000, locked: true },
 })
 eq('presence from rollup', status.presence, 'parked')
-eq('identity keeps the short id', status.identity.ownerApiId, '')
+eq('identity keeps the short id', status.identity.vehicleTagId, '')
 check('completeness is a ratio', status.completeness > 0.4 && status.completeness <= 1, String(status.completeness))
 eq('model from display name', deriveModel(null, 'Model Y Performance'), 'Model Y')
 eq('unknown model is null, never invented', deriveModel('12345678901234567', 'Garage'), null)
@@ -165,10 +165,10 @@ eq('explicit user request overrides the interval', shouldCollect({ policy: DEFAU
 // ── §21 collection mode precedence (regression for the 004 column-default bug) ─
 // A vehicle deliberately set to `passive` must never start issuing live probes just
 // because a nullable-with-default column was added underneath it.
-eq('legacy passive governs when no profile was chosen', resolvePollingProfile({ pollingProfile: null, collectionMode: 'passive' }), 'passive')
+eq('passive governs when no profile was chosen', resolvePollingProfile({ pollingProfile: null, collectionMode: 'passive' }), 'passive')
 eq('conservative maps to the default cadence', resolvePollingProfile({ pollingProfile: null, collectionMode: 'conservative' }), 'default')
 eq('on_demand relaxes the cadence', resolvePollingProfile({ pollingProfile: null, collectionMode: 'on_demand' }), 'relaxed')
-eq('an explicit profile overrides the legacy column', resolvePollingProfile({ pollingProfile: 'passive', collectionMode: 'conservative' }), 'passive')
+eq('an explicit profile overrides the previous column', resolvePollingProfile({ pollingProfile: 'passive', collectionMode: 'conservative' }), 'passive')
 eq(
   'passive mode makes no request even when forced by the schedule',
   shouldCollect({ policy: policyFor('passive'), presence: 'driving', snapshotAgeMs: null, force: false, mayWake: false }).collect,
@@ -277,7 +277,7 @@ const vehiclesAnswer = { response: { count: 1, response: [{ id: 123, id_s: '123'
   eq('403 does not attempt a refresh', refreshes, 0)
   eq('403 is not retried', calls.length, 1)
   check('403 surfaces as a forbidden error', caught instanceof TeslaApiError && caught.kind === 'forbidden', String(caught))
-  check('the Fleet-API gate is named in the message', caught instanceof TeslaApiError && /legacy API|Fleet/i.test(caught.message), caught instanceof TeslaApiError ? caught.message : '')
+  check('the Fleet-API gate is named in the message', caught instanceof TeslaApiError && /Fleet API|Fleet/i.test(caught.message), caught instanceof TeslaApiError ? caught.message : '')
 }
 
 // 5xx retries are bounded; a vehicle_data rollup is preferred over data_request.
@@ -415,16 +415,16 @@ const vehiclesAnswer = { response: { count: 1, response: [{ id: 123, id_s: '123'
   check('the User-Agent is not a browser string', Boolean(get?.headers['User-Agent']) && !/Mozilla|Chrome|Safari/.test(get?.headers['User-Agent'] ?? ''), String(get?.headers['User-Agent']))
 }
 
-// ── E2: which identifier may appear in a legacy API path ────────────────────
+// ── E2: which identifier may appear in a Fleet API path ────────────────────
 // The long 16-digit `vehicle_id` is a streaming identity. The previous resolver fell
 // through to it whenever the short id was missing, so every state request went to
 // `/api/1/vehicles/3744651726645272` and failed — indistinguishable from a dead token.
-eq('stored short id wins', resolveOwnerApiId({ owner_api_id: '1234567890', provider_vehicle_id: '999', vehicle_id: '3744651726645272' }), '1234567890')
-eq('a short legacy provider id is accepted', resolveOwnerApiId({ provider_vehicle_id: '1234567890' }), '1234567890')
-eq('a long legacy provider id is refused', resolveOwnerApiId({ provider_vehicle_id: '3744651726645272', vehicle_id: '3744651726645272' }), null)
-eq('the streaming vehicle_id is never offered as :id', resolveOwnerApiId({ vehicle_id: '3744651726645272' }), null)
-eq('a row with no identifiers has no id', resolveOwnerApiId({}), null)
-eq('a whitespace-only stored id does not count as present', resolveOwnerApiId({ owner_api_id: '  ' }), null)
+eq('stored short id wins', resolveVehicleTagId({ vehicle_tag_id: '1234567890', provider_vehicle_id: '999', vehicle_id: '3744651726645272' }), '1234567890')
+eq('a short provider id is accepted', resolveVehicleTagId({ provider_vehicle_id: '1234567890' }), '1234567890')
+eq('a long provider id is refused', resolveVehicleTagId({ provider_vehicle_id: '3744651726645272', vehicle_id: '3744651726645272' }), null)
+eq('the streaming vehicle_id is never offered as :id', resolveVehicleTagId({ vehicle_id: '3744651726645272' }), null)
+eq('a row with no identifiers has no id', resolveVehicleTagId({}), null)
+eq('a whitespace-only stored id does not count as present', resolveVehicleTagId({ vehicle_tag_id: '  ' }), null)
 
 // ── §7 awake vocabulary: `online` and `active` both mean the radio is up ─────
 eq('online and active are both awake', (['online', 'active', 'ONLINE'] as const).map(isVehicleAwake), [true, true, true])
@@ -623,9 +623,9 @@ eq('the long streaming vehicle_id is refused', (() => {
     return error instanceof TeslaApiError ? error.kind : 'wrong error'
   }
 })(), 'not_found')
-eq('no usable tag is reported as null, not sent as a bare path', fleetVehicleTag({ vin: null, owner_api_id: '3744651726645272' }), null)
-eq('VIN wins over the short id', fleetVehicleTag({ vin: '5YJ3E1IA7KF000001', owner_api_id: '100021' }), '5YJ3E1IA7KF000001')
-eq('the short id is used when no VIN is stored', fleetVehicleTag({ vin: null, owner_api_id: '100021' }), '100021')
+eq('no usable tag is reported as null, not sent as a bare path', fleetVehicleTag({ vin: null, vehicle_tag_id: '3744651726645272' }), null)
+eq('VIN wins over the short id', fleetVehicleTag({ vin: '5YJ3E1IA7KF000001', vehicle_tag_id: '100021' }), '5YJ3E1IA7KF000001')
+eq('the short id is used when no VIN is stored', fleetVehicleTag({ vin: null, vehicle_tag_id: '100021' }), '100021')
 eq('an empty row has no tag', fleetVehicleTag({}), null)
 
 // A stale redirect URI is the bug that made login look like it worked: Tesla authorized the
@@ -764,7 +764,7 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
   // pinned here is the resolution order and the fact that the built-in style still stands
   // behind both variables.
   check('the map picks a style per theme', mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_LIGHT') && mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_DARK'))
-  check('the legacy single-variable override still works', mapSource.includes('process.env.NEXT_PUBLIC_MAP_STYLE_URL,'))
+  check('the single-variable override still works', mapSource.includes('process.env.NEXT_PUBLIC_MAP_STYLE_URL,'))
   check('the built-in style is still the fallback', /if \(!override\) return buildBasemapStyle\(mode\)/.test(mapSource))
   check('no style URL is hardcoded in the component', !/tiles\.openfreemap\.org\/styles\//.test(mapSource))
   const envExample = readFileSync('.env.example', 'utf8')

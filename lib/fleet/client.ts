@@ -6,12 +6,12 @@ import type { FleetConfig } from './config'
 /**
  * The Fleet API HTTP client.
  *
- * Deliberately smaller than the legacy client it replaces. There is no cache and no
+ * Deliberately smaller than the previous client it replaces. There is no cache and no
  * in-flight deduplication, because there is no polling: every call here is either an
  * explicit user action or a single read at page load, and a memo in front of that would
  * only serve stale state and hide the fact that the car was never asked.
  *
- * The payload envelope is the same `{response: …}` shape the legacy API used, so the domain
+ * The payload envelope is the same `{response: …}` shape the Fleet API used, so the domain
  * normalizers in `lib/tesla/normalize.ts` are reused rather than rewritten.
  */
 
@@ -81,9 +81,9 @@ export function assertUsableVehicleTag(tag: string | null | undefined): string {
  * (`v.id_s || String(v.id)`). The long `vehicle_id` is never a candidate — it is filtered
  * by `assertUsableVehicleTag` rather than passed through to fail as a 404.
  */
-export function fleetVehicleTag(row: { vin?: string | null; owner_api_id?: string | null }): string | null {
+export function fleetVehicleTag(row: { vin?: string | null; vehicle_tag_id?: string | null }): string | null {
   if (row.vin) return row.vin
-  const shortId = (row.owner_api_id ?? '').trim()
+  const shortId = (row.vehicle_tag_id ?? '').trim()
   if (!shortId) return null
   try {
     return assertUsableVehicleTag(shortId)

@@ -199,7 +199,7 @@ export class TeslaClient {
       const body = options.body === undefined ? undefined : typeof options.body === 'string' ? options.body : JSON.stringify(options.body)
       const headers: Record<string, string> = {
         Accept: 'application/json',
-        // Only when there is a body. TeslaMate's legacy client sends nothing but
+        // Only when there is a body. TeslaMate's reference client sends nothing but
         // `user-agent` and `Authorization`, and the June-2026 403 wave was diagnosed
         // in its tracker as Tesla rejecting clients whose request shape it does not
         // like — a `Content-Type` on a bodyless GET is exactly such an oddity.
@@ -331,13 +331,13 @@ export class TeslaClient {
     retryAfterMs?: number,
   ) {
     const detail = redactJsonText(rawText)?.slice(0, 400) ?? ''
-    // The legacy API sunset signature: a 403 whose body points at the Fleet API
+    // The Fleet API sunset signature: a 403 whose body points at the Fleet API
     // docs. Named explicitly so /debug/api can report it as a platform gate
     // instead of prompting the user to re-create working credentials.
     if (kind === 'forbidden' && /fleet-api|fleetapi|developer\.tesla\.com/i.test(detail)) {
       return new TeslaApiError(
         'forbidden',
-        'Tesla has closed legacy API access for this token (403). The response references the Fleet API - this is a platform limitation, not a request error.',
+        'Tesla has closed Fleet API access for this token (403). The response references the Fleet API - this is a platform limitation, not a request error.',
         { status, endpoint, method, attempts: attempt, responseBody: detail },
       )
     }
@@ -394,7 +394,7 @@ export class TeslaClient {
 
   /**
    * GET /api/1/vehicles — vehicle discovery. This is the only call that returns
-   * the short `id`, so every other method takes an explicit `ownerApiId`.
+   * the short `id`, so every other method takes an explicit `vehicleTagId`.
    */
   async getVehicles(options: RequestOptions = {}): Promise<RawVehicleListItem[]> {
     const payload = await this.request<{ response?: RawVehicleListItem[] } | RawVehicleListItem[]>('/api/1/vehicles', {
@@ -406,10 +406,10 @@ export class TeslaClient {
   }
 
   /** GET /api/1/vehicles/{id} — presence/connectivity without telemetry weight. */
-  async getVehicle(ownerApiId: string, options: RequestOptions = {}): Promise<RawVehicleListItem> {
-    const payload = await this.request<RawVehicleListItem>(`/api/1/vehicles/${encodeURIComponent(ownerApiId)}`, {
+  async getVehicle(vehicleTagId: string, options: RequestOptions = {}): Promise<RawVehicleListItem> {
+    const payload = await this.request<RawVehicleListItem>(`/api/1/vehicles/${encodeURIComponent(vehicleTagId)}`, {
       requestType: 'vehicle_status',
-      vehicleId: ownerApiId,
+      vehicleId: vehicleTagId,
       ...options,
     })
     return payload
@@ -420,10 +420,10 @@ export class TeslaClient {
    * drive_state, climate_state, charge_state, gui_settings, vehicle_state and
    * vehicle_config in one call. Takes no query parameters per the docs.
    */
-  async getVehicleData(ownerApiId: string, options: RequestOptions = {}): Promise<RawVehicleData> {
-    return this.request<RawVehicleData>(`/api/1/vehicles/${encodeURIComponent(ownerApiId)}/vehicle_data`, {
+  async getVehicleData(vehicleTagId: string, options: RequestOptions = {}): Promise<RawVehicleData> {
+    return this.request<RawVehicleData>(`/api/1/vehicles/${encodeURIComponent(vehicleTagId)}/vehicle_data`, {
       requestType: 'vehicle_data',
-      vehicleId: ownerApiId,
+      vehicleId: vehicleTagId,
       ...options,
     })
   }
@@ -434,29 +434,29 @@ export class TeslaClient {
    * these read from the rollup — which the TTL cache means is fetched once, however
    * many sections a page asks for. No component ever calls `data_request/*`.
    */
-  private async section<K extends 'drive_state' | 'charge_state' | 'climate_state' | 'vehicle_state'>(ownerApiId: string, key: K) {
-    const data = await this.getVehicleData(ownerApiId, { requestType: key, vehicleId: ownerApiId })
+  private async section<K extends 'drive_state' | 'charge_state' | 'climate_state' | 'vehicle_state'>(vehicleTagId: string, key: K) {
+    const data = await this.getVehicleData(vehicleTagId, { requestType: key, vehicleId: vehicleTagId })
     return data.response?.[key] ?? data[key] ?? null
   }
 
-  getDriveState(ownerApiId: string) {
-    return this.section(ownerApiId, 'drive_state')
+  getDriveState(vehicleTagId: string) {
+    return this.section(vehicleTagId, 'drive_state')
   }
 
-  getChargeState(ownerApiId: string) {
-    return this.section(ownerApiId, 'charge_state')
+  getChargeState(vehicleTagId: string) {
+    return this.section(vehicleTagId, 'charge_state')
   }
 
-  getClimateState(ownerApiId: string) {
-    return this.section(ownerApiId, 'climate_state')
+  getClimateState(vehicleTagId: string) {
+    return this.section(vehicleTagId, 'climate_state')
   }
 
-  getVehicleState(ownerApiId: string) {
-    return this.section(ownerApiId, 'vehicle_state')
+  getVehicleState(vehicleTagId: string) {
+    return this.section(vehicleTagId, 'vehicle_state')
   }
 
-  async getVehicleConfig(ownerApiId: string) {
-    const data = await this.getVehicleData(ownerApiId, { vehicleId: ownerApiId })
+  async getVehicleConfig(vehicleTagId: string) {
+    const data = await this.getVehicleData(vehicleTagId, { vehicleId: vehicleTagId })
     return data.response?.vehicle_config ?? data.vehicle_config ?? null
   }
 
@@ -470,10 +470,10 @@ export class TeslaClient {
    * Returns the merged domain model plus the raw merged payload the debug console
    * needs — nothing else in the app touches the raw shape.
    */
-  async getVehicleStatus(ownerApiId: string, options: RequestOptions = {}): Promise<{ status: VehicleStatus; raw: RawMergedVehicle; telemetryCollected: boolean }> {
-    const entry = await this.getVehicle(ownerApiId, { requestType: 'vehicle_status', vehicleId: ownerApiId, ...options })
+  async getVehicleStatus(vehicleTagId: string, options: RequestOptions = {}): Promise<{ status: VehicleStatus; raw: RawMergedVehicle; telemetryCollected: boolean }> {
+    const entry = await this.getVehicle(vehicleTagId, { requestType: 'vehicle_status', vehicleId: vehicleTagId, ...options })
     const asleep = !isVehicleAwake(entry.state)
-    const data = asleep ? null : await this.getVehicleData(ownerApiId, { vehicleId: ownerApiId, ...options })
+    const data = asleep ? null : await this.getVehicleData(vehicleTagId, { vehicleId: vehicleTagId, ...options })
     const merged = mergeVehicleData(entry, data)
     return { status: normalizeVehicleStatus(merged), raw: merged, telemetryCollected: !asleep }
   }
@@ -483,11 +483,11 @@ export class TeslaClient {
    * implementation announced POST and sent GET (plan E1). Not called by ordinary
    * navigation — only behind the UI's confirmed "Refresh" action.
    */
-  async wakeVehicle(ownerApiId: string, options: RequestOptions = {}) {
-    return this.request<RawVehicleListItem>(`/api/1/vehicles/${encodeURIComponent(ownerApiId)}/wake_up`, {
+  async wakeVehicle(vehicleTagId: string, options: RequestOptions = {}) {
+    return this.request<RawVehicleListItem>(`/api/1/vehicles/${encodeURIComponent(vehicleTagId)}/wake_up`, {
       method: 'POST',
       requestType: 'wake_up',
-      vehicleId: ownerApiId,
+      vehicleId: vehicleTagId,
       noCache: true,
       ...options,
     })

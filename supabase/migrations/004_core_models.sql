@@ -4,11 +4,11 @@
 
 -- ── Vehicle identity: the short Fleet tag id vs the long cross-endpoint id ──
 -- Requirement §44: `{id}` addresses state/command endpoints, `vehicle_id` addresses
--- streaming. The legacy single column stored whichever one the connect path happened
+-- streaming. The previous single column stored whichever one the connect path happened
 -- to write, which is how the live row ended up holding a 16-digit vehicle_id in a
 -- slot that every state call uses as `{id}`.
 alter table public.vehicles
-  add column if not exists owner_api_id text,
+  add column if not exists vehicle_tag_id text,
   add column if not exists vehicle_id text,
   add column if not exists vin text,
   add column if not exists distance_unit text not null default 'km' check (distance_unit in ('km', 'mi')),
@@ -16,15 +16,15 @@ alter table public.vehicles
   add column if not exists last_seen_at timestamptz,
   add column if not exists last_collected_at timestamptz;
 
-comment on column public.vehicles.owner_api_id is 'Short fleet tag id — the {id} path segment for /api/1/vehicles/{id}/...';
+comment on column public.vehicles.vehicle_tag_id is 'Short fleet tag id — the {id} path segment for /api/1/vehicles/{id}/...';
 comment on column public.vehicles.vehicle_id is 'Long vehicle_id — streaming and cross-endpoint identity only. Never used as a path id.';
 
--- Backfill from the legacy column when it clearly holds a short id (<= 12 digits).
+-- Backfill from the existing provider column when it clearly holds a short id (<= 12 digits).
 update public.vehicles
-  set owner_api_id = provider_vehicle_id
-  where owner_api_id is null and provider_vehicle_id ~ '^[0-9]{1,12}$';
+  set vehicle_tag_id = provider_vehicle_id
+  where vehicle_tag_id is null and provider_vehicle_id ~ '^[0-9]{1,12}$';
 
--- Otherwise treat the legacy value as the long id and leave owner_api_id to be
+-- Otherwise treat that existing value as the long id and leave vehicle_tag_id to be
 -- reconciled from the next successful GET /api/1/vehicles (service.reconcileIdentities).
 update public.vehicles
   set vehicle_id = provider_vehicle_id
