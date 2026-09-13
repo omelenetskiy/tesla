@@ -82,8 +82,13 @@ export function AppShell({children}: { children: React.ReactNode }) {
         Fixed-height column: the page itself never scrolls. <main> owns the scroll,
         and every list inside a page scrolls within its own card, so a header or a
         dock never drifts out of reach on the car screen.
+
+        The top padding carries the status bar. In the installed iPhone app the page runs
+        edge to edge (viewport-fit=cover), so without this the screen title is drawn under
+        the clock. It is `px`/`pb`/`pt` rather than `p` plus `pt` because the two set the
+        same longhand and the winner would be whichever rule Tailwind emitted last.
       */}
-            <div className="flex h-dvh flex-col overflow-hidden bg-canvas p-2 sm:p-4">
+            <div className="flex h-dvh flex-col overflow-hidden bg-canvas px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] sm:px-4 sm:pb-4 sm:pt-[calc(1rem+env(safe-area-inset-top))]">
                 <div
                     className="mx-auto flex h-full w-full max-w-[1500px] flex-1 flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
                     {/*
@@ -243,9 +248,9 @@ export function StatusPill({presence, collectedAt, className}: {
  * space is precious. Appearance is not here: it is a setting, and Settings is where a
  * user looks for it.
  *
- * Signing out clears the app's own Supabase session. It deliberately does not touch
- * the stored Tesla tokens — those are the thing that is expensive to replace, and
- * logging out of the UI is not a request to disconnect the car.
+ * Signing out clears the app's own Supabase session AND disconnects Fleet API tokens
+ * (via DELETE /api/fleet/credentials). Fleet tokens are app-controlled secrets that
+ * must be cleared on logout to enforce the auth gate.
  */
 function UserMenu() {
     const router = useRouter()
@@ -254,6 +259,12 @@ function UserMenu() {
     const signOut = async () => {
         setSigningOut(true)
         try {
+            // Delete Fleet credentials first (forces deauth)
+            await fetch('/api/fleet/credentials', { method: 'DELETE' }).catch(() => {
+                // Silent fail — app can sign out even if credential delete fails
+              })
+            
+            // Then sign out of app
             await createSupabaseBrowserClient().auth.signOut()
             router.replace('/login')
             router.refresh()
