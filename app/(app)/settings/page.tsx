@@ -1,9 +1,8 @@
 'use client'
 
 import * as React from 'react'
-import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Bug, ExternalLink, KeyRound, Monitor, Moon, Palette, ShieldCheck, Sun } from 'lucide-react'
+import { ExternalLink, KeyRound, Monitor, Moon, Palette, ShieldCheck, Sun } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Segmented } from '@/components/ui/segmented'
 import { cn } from '@/lib/utils'
@@ -147,19 +146,6 @@ export default function SettingsPage() {
           <p className="mt-2.5 text-[11.5px] leading-4 text-ink-tertiary">
             Step 4 is what the authorization page calls the &quot;virtual key pairing&quot; step. It is a one-time action per vehicle.
           </p>
-        </section>
-
-        <section className="rounded-xl border border-line bg-surface p-4">
-          <h2 className="flex items-center gap-2 text-[14px] font-semibold text-ink">
-            <Bug className="size-4 text-ink-tertiary" aria-hidden />
-            Diagnostics
-          </h2>
-          <p className="mt-1.5 text-[12.5px] leading-5 text-ink-secondary">
-            The Owner API console runs each request live and shows Tesla&apos;s status, timing, sanitized response, history and an authentication check.
-          </p>
-          <Link href="/debug/api" className="mt-2.5 inline-flex h-10 items-center rounded-lg border border-line bg-surface px-4 text-[13.5px] font-medium text-ink shadow-xs hover:bg-surface-muted">
-            Open API console
-          </Link>
         </section>
 
         <section className="rounded-xl border border-line bg-surface p-4">
@@ -387,12 +373,6 @@ function SettingsSkeleton() {
             </div>
           ))}
         </div>
-      </div>
-      {/* Diagnostics */}
-      <div className="rounded-xl border border-line bg-surface p-4">
-        <div className="h-4 w-32 animate-pulse rounded bg-surface-muted" />
-        <div className="mt-2 h-3 w-full animate-pulse rounded bg-surface-muted" />
-        <div className="mt-3 h-10 w-40 animate-pulse rounded-lg bg-surface-muted" />
       </div>
       {/* Storage */}
       <div className="rounded-xl border border-line bg-surface p-4">

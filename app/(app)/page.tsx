@@ -77,9 +77,6 @@ export default function DashboardPage() {
         {feed.error && (
           <section className="rounded-xl border border-danger-line bg-danger-soft px-4 py-3">
             <p className="text-[13.5px] font-medium text-danger">{feed.error.message}</p>
-            <Link href="/debug/api" className="mt-1 inline-block text-[12.5px] text-danger underline underline-offset-2">
-              Inspect the request in the API console
-            </Link>
           </section>
         )}
         <section className="rounded-xl border border-line bg-surface p-5">

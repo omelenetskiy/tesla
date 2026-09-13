@@ -5,7 +5,6 @@ import Link from 'next/link'
 import {usePathname, useRouter} from 'next/navigation'
 import {
     Battery,
-    Bug,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -57,7 +56,6 @@ const NAV = [
 
 const SECONDARY = [
     {href: '/settings', label: 'Settings', icon: Settings},
-    {href: '/debug/api', label: 'API console', icon: Bug},
 ]
 
 
@@ -285,10 +283,6 @@ function UserMenu() {
                 <DropdownMenuItem onSelect={() => router.push('/settings')}>
                     <Settings className="size-4 text-ink-tertiary" aria-hidden/>
                     Settings
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push('/debug/api')}>
-                    <Bug className="size-4 text-ink-tertiary" aria-hidden/>
-                    API console
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator/>

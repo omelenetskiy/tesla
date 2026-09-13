@@ -115,7 +115,9 @@ export default function TeslaLoginPage() {
           This page is only for Tesla Fleet authorization. Your Tesla password is entered on Tesla&apos;s own domain.
         </p>
 
-        <FleetBanner />
+        <React.Suspense fallback={null}>
+          <FleetBanner />
+        </React.Suspense>
 
         {loading ? (
           <p className="rounded-lg border border-line bg-surface-muted px-3 py-2 text-[12.5px] text-ink-secondary">Checking connection status…</p>
