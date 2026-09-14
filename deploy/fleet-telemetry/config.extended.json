@@ -1,0 +1,374 @@
+{
+  "hostname": "${TELEMETRY_HOST}",
+  "port": 443,
+  "gtw_addr": "localhost:9090",
+  "log_level": "info",
+  "log_streaming": true,
+  "reliable_ack_sources": ["vehicle"],
+  "rate_limit": {
+    "enabled": true,
+    "max_msgs_per_min": 100000
+  },
+  "tls": {
+    "cert": "./certs/server.crt",
+    "key": "./certs/server.key",
+    "ca": "./certs/ca.crt"
+  },
+  "records": [
+    {
+      "record": "Trips",
+      "interval_seconds": 1
+    },
+    {
+      "record": "V",
+      "fields": [
+        {
+          "name": "Timestamp",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CreatedAt",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Vin",
+          "interval_seconds": 1
+        },
+        {
+          "name": "VehicleSpeed",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Location",
+          "interval_seconds": 1
+        },
+        {
+          "name": "GpsHeading",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Odometer",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Gear",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Soc",
+          "interval_seconds": 1
+        },
+        {
+          "name": "EstBatteryRange",
+          "interval_seconds": 1
+        },
+        {
+          "name": "IdealBatteryRange",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BatteryLevel",
+          "interval_seconds": 1
+        },
+        {
+          "name": "UsableBatteryLevel",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargeAmps",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargeEnergy",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargerVoltage",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargerCurrent",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargerPhases",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargerPower",
+          "interval_seconds": 1
+        },
+        {
+          "name": "DetailedChargeState",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargePortOpen",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargeDoorOpen",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargeLimitSoc",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargeRate",
+          "interval_seconds": 1
+        },
+        {
+          "name": "FastChargerPresent",
+          "interval_seconds": 1
+        },
+        {
+          "name": "FastChargerType",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BatteryHeaterOn",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BatteryHeaterSupported",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BatteryGridHeaterOn",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsFlPressure",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsFrPressure",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsRlPressure",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsRrPressure",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsFlStatus",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsFrStatus",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsRlStatus",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TpmsRrStatus",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Locked",
+          "interval_seconds": 1
+        },
+        {
+          "name": "DoorState",
+          "interval_seconds": 1
+        },
+        {
+          "name": "WindowOpen",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TrunkOpen",
+          "interval_seconds": 1
+        },
+        {
+          "name": "FrunkOpen",
+          "interval_seconds": 1
+        },
+        {
+          "name": "InsideTempC",
+          "interval_seconds": 1
+        },
+        {
+          "name": "OutsideTempC",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ClimateTempSetting",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ClimateOn",
+          "interval_seconds": 1
+        },
+        {
+          "name": "IsPreconditioning",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SeatHeaterLeft",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SeatHeaterRight",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SeatHeaterRearLeft",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SeatHeaterRearCenter",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SeatHeaterRearRight",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CabinOvrheatProtectionActive",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CabinOvrheatProtectionMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ClimateKeeperMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BrakePedalActive",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CruiseControlState",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CruiseControlSetSpeed",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BlindSpotMonitorLeft",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BlindSpotMonitorRight",
+          "interval_seconds": 1
+        },
+        {
+          "name": "BlindSpotMonitorMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "CollisionWarning",
+          "interval_seconds": 1
+        },
+        {
+          "name": "EmergencyBraking",
+          "interval_seconds": 1
+        },
+        {
+          "name": "EmergencyBrakingActive",
+          "interval_seconds": 1
+        },
+        {
+          "name": "LaneKeepAssistActive",
+          "interval_seconds": 1
+        },
+        {
+          "name": "LaneKeepAssistMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "TrackMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "PowerKw",
+          "interval_seconds": 1
+        },
+        {
+          "name": "PackVoltage",
+          "interval_seconds": 1
+        },
+        {
+          "name": "PackCurrent",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SoftwareUpdateProgress",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Connectivity",
+          "interval_seconds": 1
+        },
+        {
+          "name": "VehicleName",
+          "interval_seconds": 1
+        },
+        {
+          "name": "VehicleType",
+          "interval_seconds": 1
+        },
+        {
+          "name": "PaintColor",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Trim",
+          "interval_seconds": 1
+        },
+        {
+          "name": "WheelType",
+          "interval_seconds": 1
+        },
+        {
+          "name": "WheelSize",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ChargePortType",
+          "interval_seconds": 1
+        },
+        {
+          "name": "Firmware",
+          "interval_seconds": 1
+        },
+        {
+          "name": "ServiceMode",
+          "interval_seconds": 1
+        },
+        {
+          "name": "MilesSinceReset",
+          "interval_seconds": 1
+        },
+        {
+          "name": "SelfDrivingMilesSinceReset",
+          "interval_seconds": 1
+        }
+      ]
+    },
+    {
+      "record": "Alerts",
+      "interval_seconds": 1
+    },
+    {
+      "record": "Errors",
+      "interval_seconds": 1
+    }
+  ],
+  "transmit_decoded_records": true,
+  "logger": {
+    "dispatcher": "logger",
+    "verbose": true
+  }
+}
+

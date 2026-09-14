@@ -20,6 +20,8 @@ import { cn } from '@/lib/utils'
 
 export type Tone = 'ink' | 'muted' | 'ok' | 'warn' | 'danger'
 
+const DRAG_HOLD_DELAY_MS = 180
+
 const TONE_TEXT: Record<Tone, string> = {
   ink: 'text-ink',
   muted: 'text-ink-tertiary',
@@ -55,6 +57,7 @@ export function Card({
   // nothing else in the card takes that gesture — which is what leaves the map free to be
   // panned. Outside one, the header is a label.
   const grid = useGridCard()
+  const dragDelay = useDragHoldDelay(Boolean(grid))
 
   return (
     <section className={cn('dash-card flex h-full flex-col overflow-hidden rounded-xl border border-line bg-surface p-4 shadow-xs', className)} aria-label={title}>
@@ -68,7 +71,10 @@ export function Card({
         the box's, the box would be set from it, and every card would ratchet to zero.
       */}
       <div className="dash-stack shrink-0 grow-0">
-        <header className={cn('mb-3 flex shrink-0 items-center gap-2', grid && 'dash-head')}>
+        <header
+          {...dragDelay.bind}
+          className={cn('mb-3 flex shrink-0 items-center gap-2', grid && 'dash-head', dragDelay.armed && 'dash-head-armed')}
+        >
           {Icon && <Icon className="size-[15px] shrink-0 text-ink-tertiary" aria-hidden />}
           <h2 className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-[0.09em] text-ink-tertiary">{title}</h2>
           {aside && <div className="ml-auto flex shrink-0 items-center gap-2 text-[11.5px] text-ink-tertiary">{aside}</div>}
@@ -79,6 +85,90 @@ export function Card({
       </div>
     </section>
   )
+}
+
+function useDragHoldDelay(enabled: boolean): {
+  armed: boolean
+  bind: React.HTMLAttributes<HTMLElement>
+} {
+  const [armed, setArmed] = React.useState(false)
+  const timerRef = React.useRef<number | null>(null)
+  const releaseRef = React.useRef<(() => void) | null>(null)
+  const pressedRef = React.useRef(false)
+
+  const clear = React.useCallback(() => {
+    pressedRef.current = false
+    setArmed(false)
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    releaseRef.current?.()
+    releaseRef.current = null
+  }, [])
+
+  React.useEffect(() => clear, [clear])
+
+  const onPointerDown = React.useCallback<NonNullable<React.HTMLAttributes<HTMLElement>['onPointerDown']>>(
+    (event) => {
+      if (!enabled) return
+      if (event.pointerType === 'mouse' && event.button !== 0) return
+      clear()
+      pressedRef.current = true
+      releaseRef.current = blockDragMovesTemporarily()
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null
+        releaseRef.current?.()
+        releaseRef.current = null
+        if (pressedRef.current) setArmed(true)
+      }, DRAG_HOLD_DELAY_MS)
+    },
+    [clear, enabled],
+  )
+
+  const onPointerUp = React.useCallback<NonNullable<React.HTMLAttributes<HTMLElement>['onPointerUp']>>(() => {
+    clear()
+  }, [clear])
+
+  const onPointerCancel = React.useCallback<NonNullable<React.HTMLAttributes<HTMLElement>['onPointerCancel']>>(() => {
+    clear()
+  }, [clear])
+
+  const onPointerLeave = React.useCallback<NonNullable<React.HTMLAttributes<HTMLElement>['onPointerLeave']>>(
+    (event) => {
+      if (event.buttons === 0) clear()
+    },
+    [clear],
+  )
+
+  if (!enabled) return { armed: false, bind: {} }
+
+  return {
+    armed,
+    bind: {
+      onPointerDown,
+      onPointerUp,
+      onPointerCancel,
+      onPointerLeave,
+    },
+  }
+}
+
+function blockDragMovesTemporarily(): () => void {
+  const block = (event: Event) => {
+    if (event.cancelable) event.preventDefault()
+    event.stopPropagation()
+  }
+
+  window.addEventListener('pointermove', block, { capture: true, passive: false })
+  window.addEventListener('mousemove', block, { capture: true, passive: false })
+  window.addEventListener('touchmove', block, { capture: true, passive: false })
+
+  return () => {
+    window.removeEventListener('pointermove', block, true)
+    window.removeEventListener('mousemove', block, true)
+    window.removeEventListener('touchmove', block, true)
+  }
 }
 
 /** The largest type on a card: a number the driver reads from across the cabin. */

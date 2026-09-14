@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
+import { hasSupabaseAuthEnv, SUPABASE_AUTH_ENV_ERROR } from '@/lib/supabase-auth-env'
 
 /**
  * Application account (not Tesla). This is a local Supabase identity that owns the
@@ -13,22 +14,26 @@ import { createSupabaseBrowserClient } from '@/lib/supabase-browser'
 export default function LoginPage() {
   const router = useRouter()
   const supabase = createSupabaseBrowserClient()
+  const supabaseConfigured = hasSupabaseAuthEnv()
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const configurationError = !supabaseConfigured ? SUPABASE_AUTH_ENV_ERROR : ''
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setLoading(true)
     setError('')
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      setError('Supabase is not configured. Add the project URL and publishable key to the environment.')
+    if (!supabaseConfigured) {
+      setError(SUPABASE_AUTH_ENV_ERROR)
       setLoading(false)
       return
     }
-    const result = mode === 'login' ? await supabase.auth.signInWithPassword({ email, password }) : await supabase.auth.signUp({ email, password })
+    const result = mode === 'login'
+      ? await supabase.auth.signInWithPassword({ email, password })
+      : await supabase.auth.signUp({ email, password })
     if (result.error) {
       setError(result.error.message)
       setLoading(false)
@@ -67,10 +72,10 @@ export default function LoginPage() {
             <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required className={field} />
           </label>
 
-          {error && (
+          {(error || configurationError) && (
             <p role="alert" className="flex items-start gap-2 rounded-lg border border-danger-line bg-danger-soft px-3 py-2 text-[12.5px] leading-4 text-danger">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-              <span className="min-w-0">{error}</span>
+              <span className="min-w-0">{error || configurationError}</span>
             </p>
           )}
 

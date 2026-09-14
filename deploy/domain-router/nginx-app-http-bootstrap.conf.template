@@ -1,0 +1,32 @@
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __APP_HOST__;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    location = /.well-known/appspecific/com.tesla.3p.public-key.pem {
+        alias __PUBLIC_KEY_FILE__;
+        default_type application/x-pem-file;
+        add_header Cache-Control "public, max-age=300" always;
+    }
+
+    location / {
+        proxy_pass __UPSTREAM_ORIGIN__;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+
+        proxy_set_header Host __UPSTREAM_HOST__;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto http;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+

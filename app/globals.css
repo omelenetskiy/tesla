@@ -387,6 +387,10 @@ select:focus:not(:focus-visible),
   cursor: grabbing;
 }
 
+.dash-head-armed {
+  background: color-mix(in srgb, var(--surface-muted) 78%, transparent);
+}
+
 /* The grid item is the box react-grid-layout sizes; the 12px of padding-bottom is the row
    gap, paid for inside the height so a card's `h` stays its own pixel height plus the gap. */
 .dash-grid-root {

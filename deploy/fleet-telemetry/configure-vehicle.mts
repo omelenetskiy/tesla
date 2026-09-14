@@ -26,7 +26,7 @@ function flag(name: string, fallback?: string): string | undefined {
 /**
  * Field set for the dashboard: state, position, charge and health.
  *
- * Names are the proto `Field` spellings, not the intuitive ones — there is no `Speed`,
+ * Names are the proto `Field` spellings, not the intuitive ones - there is no `Speed`,
  * `Heading` or `Power`; the real names are `VehicleSpeed`, `GpsHeading`, and per-kind power
  * fields. `PackVoltage`/`PackCurrent` do exist. An unknown name is rejected by the API, and
  * the whole config with it, so this list is the contract.
@@ -75,11 +75,11 @@ async function main() {
     .maybeSingle()
   if (vehicleError) throw new Error(`vehicles unreadable: ${vehicleError.message}`)
   const vin = wanted ?? vehicle?.vin
-  if (!vin) throw new Error('No VIN on file — run the app once so the vehicle list syncs, or pass --vin=…')
+  if (!vin) throw new Error('No VIN on file - run the app once so the vehicle list syncs, or pass --vin=...')
 
   const hostname = flag('hostname')
-  const portRaw = flag('port', '443')
-  const caFile = flag('ca-file', 'certs/fullchain.pem')
+  const portRaw = flag('port', '443') ?? '443'
+  const caFile = flag('ca-file', 'certs/fullchain.pem') ?? 'certs/fullchain.pem'
   const dryRun = process.argv.includes('--dry-run')
 
   if (!dryRun && !hostname) throw new Error('--hostname is required (or use --dry-run). It must share the root domain of the registered app.')
@@ -103,9 +103,14 @@ async function main() {
 
   console.log(`vin        ${vin}${vehicle?.display_name ? ` (${vehicle.display_name})` : ''}`)
   console.log(`region     ${config.region} -> ${config.apiBaseUrl}`)
+  console.log(`proxy      ${config.commandProxyUrl ?? 'direct Fleet API'}`)
   console.log(`hostname   ${body.config.hostname}:${body.config.port}`)
   console.log(`ca         ${caFile} (${ca.length} bytes)`)
   console.log(`fields     ${Object.keys(fields as object).length} signals`)
+
+  if (!dryRun && !config.commandProxyUrl) {
+    throw new Error('TESLA_HTTP_PROXY_URL is required for fleet_telemetry_config. Start the vehicle-command proxy and set TESLA_HTTP_PROXY_URL before running this script.')
+  }
 
   if (dryRun) {
     console.log('\n--dry-run, nothing was sent. Body without the certificate:')
@@ -133,13 +138,13 @@ async function main() {
       { method: 'POST', body: { vins: [vin] }, requestType: 'telemetry_config' },
     )
     .catch((error) => {
-      console.warn(`fleet_status unavailable (${error instanceof Error ? error.message : 'unknown'}) — continuing without the pre-check.`)
+      console.warn(`fleet_status unavailable (${error instanceof Error ? error.message : 'unknown'}) - continuing without the pre-check.`)
       return null
     })
   if (status) {
     const info = status.vehicle_info?.[vin]
     const paired = status.key_paired_vins?.includes(vin)
-    console.log(`key paired   ${paired ? 'yes' : 'NO'}${info?.firmware_version ? ` · firmware ${info.firmware_version}` : ''}${info?.fleet_telemetry_version ? ` · telemetry client ${info.fleet_telemetry_version}` : ''}`)
+    console.log(`key paired   ${paired ? 'yes' : 'NO'}${info?.firmware_version ? `  firmware ${info.firmware_version}` : ''}${info?.fleet_telemetry_version ? `  telemetry client ${info.fleet_telemetry_version}` : ''}`)
     if (!paired) {
       console.error('\nThe app key is not installed on this vehicle, so the config will be rejected with')
       console.error('skipped_vehicles.missing_key. Do this first:')

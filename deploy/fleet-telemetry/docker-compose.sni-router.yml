@@ -1,16 +1,17 @@
 services:
   fleet-telemetry:
-    # Pin a tag rather than `latest`: the server version is part of the vehicle config's
-    # contract (`delivery_policy` needs >= 0.7.1), and an unpinned image silently changes it.
-    # Current tags: https://hub.docker.com/r/tesla/fleet-telemetry/tags
     image: tesla/fleet-telemetry:v0.9.4
     command: ["/fleet-telemetry", "-config=/etc/fleet-telemetry/config.json"]
-    network_mode: host
     user: root
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8443:443"
+      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:4269:4269"
     volumes:
       - ./config.local.json:/etc/fleet-telemetry/config.json:ro
       - ./certs:/etc/fleet-telemetry/certs:ro
+
   vehicle-command-proxy:
     image: tesla/vehicle-command:latest
     user: root
@@ -30,3 +31,4 @@ services:
     volumes:
       - ./certs:/tls:ro
       - ./keys/private.pem:/key/fleet-key.pem:ro
+

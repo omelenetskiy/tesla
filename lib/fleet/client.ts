@@ -1,4 +1,4 @@
-import { TeslaApiError, classifyStatus, isRefreshEligible } from '../tesla/errors'
+import { TeslaApiError, classifyStatus } from '../tesla/errors'
 import { redactText, sanitizeBody, sanitizeHeaders, sanitizeUrl } from '../tesla/sanitize'
 import type { RawVehicleData, RawVehicleListItem } from '../tesla/normalize'
 import type { FleetConfig } from './config'
@@ -57,6 +57,10 @@ type RequestOptions = {
 
 const USER_AGENT = 'DriveScope/1.0 (tesla fleet api client)'
 
+function shouldUseCommandProxy(requestType?: string): boolean {
+  return requestType === 'command' || requestType === 'wake_up' || requestType === 'telemetry_config'
+}
+
 /**
  * `{vehicle_tag}` accepts the VIN *or* the short numeric id; the long 16-digit
  * `vehicle_id` is not valid there. Tesla's docs only ever write `{vehicle_tag}` without
@@ -99,8 +103,11 @@ export class FleetClient {
     this.deps = deps
   }
 
-  private buildUrl(path: string, query?: RequestOptions['query']) {
-    const url = new URL(`${this.deps.config.apiBaseUrl}${path}`)
+  private buildUrl(path: string, query?: RequestOptions['query'], requestType?: string) {
+    const baseUrl = this.deps.config.commandProxyUrl && shouldUseCommandProxy(requestType)
+      ? this.deps.config.commandProxyUrl
+      : this.deps.config.apiBaseUrl
+    const url = new URL(`${baseUrl}${path}`)
     if (query) {
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value))
@@ -111,7 +118,7 @@ export class FleetClient {
 
   async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     const method = options.method ?? 'GET'
-    const url = this.buildUrl(path, options.query)
+    const url = this.buildUrl(path, options.query, options.requestType)
     const safePath = path.replace(/\/[^/]*$/, (segment) => (segment.includes('.') ? '/{vehicle_tag}' : segment))
     const startedAt = new Date().toISOString()
     const body = options.body === undefined ? undefined : typeof options.body === 'string' ? options.body : JSON.stringify(options.body)
@@ -188,7 +195,7 @@ export class FleetClient {
   }
 
   private log(
-    path: string,
+    _path: string,
     safePath: string,
     method: string,
     url: URL,
@@ -264,6 +271,7 @@ export class FleetClient {
   command<T = { result: boolean; reason?: string }>(tag: string, name: string, body: unknown = {}, options: RequestOptions = {}): Promise<T> {
     const safe = assertUsableVehicleTag(tag)
     if (!/^[a-z0-9_]+$/.test(name)) throw new TeslaApiError('malformed', `Refusing to build a command path from "${name}"`)
+    if (name === 'wake_up') return this.wakeVehicle(safe, options) as Promise<T>
     return this.request(`/api/1/vehicles/${encodeURIComponent(safe)}/command/${encodeURIComponent(name)}`, { method: 'POST', body, requestType: 'command', ...options })
   }
 
@@ -271,6 +279,4 @@ export class FleetClient {
   static isVehicleUnavailable(error: unknown) {
     return error instanceof TeslaApiError && (error.kind === 'vehicle_unavailable' || error.status === 408)
   }
-
-  static refreshWouldHelp = isRefreshEligible
 }

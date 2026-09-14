@@ -8,9 +8,22 @@
 
 export type VehicleIdColumns = {
   vehicle_tag_id?: string | null
+  provider_vehicle_id?: string | null
+  vehicle_id?: string | null
+}
+
+function isShortVehicleTagId(value: string): boolean {
+  return /^\d{1,15}$/.test(value.trim())
 }
 
 export function resolveVehicleTagId(row: VehicleIdColumns): string | null {
   const stored = row.vehicle_tag_id?.trim()
-  return stored || null
+  if (stored) return stored
+
+  const provider = row.provider_vehicle_id?.trim()
+  if (provider && isShortVehicleTagId(provider) && provider !== row.vehicle_id?.trim()) {
+    return provider
+  }
+
+  return null
 }

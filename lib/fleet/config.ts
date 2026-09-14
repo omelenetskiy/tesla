@@ -2,7 +2,7 @@
  * Fleet API environment layer.
  *
  * Every host, path and scope string here is quoted verbatim in
- * `docs/TESLA_FLEET_MIGRATION_PLAN.md` §4a. Nothing in this file is inferred, and anything
+ * `docs/TESLA_FLEET_MIGRATION_PLAN.md` 4a. Nothing in this file is inferred, and anything
  * that is not pinned there (userinfo, telemetry config, commands) deliberately does not
  * appear here at all — an unpinned path in a config file is how the previous build ended
  * up requesting `/oauth2/v3/oauth2/v3/token` for two weeks.
@@ -18,7 +18,7 @@
 
 export type FleetRegion = 'na' | 'eu' | 'cn'
 
-/** §4a C3, quoted from the regions page. */
+/** 4a C3, quoted from the regions page. */
 const REGION_BASE_URLS: Record<FleetRegion, string> = {
   na: 'https://fleet-api.prd.na.vn.cloud.tesla.com',
   eu: 'https://fleet-api.prd.eu.vn.cloud.tesla.com',
@@ -29,7 +29,7 @@ export const FLEET_TOKEN_URL = 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2
 export const FLEET_AUTHORIZE_URL = 'https://auth.tesla.com/oauth2/v3/authorize'
 
 /**
- * §4a C2 plus `vehicle_location`.
+ * 4a C2 plus `vehicle_location`.
  *
  * The docs' own third-party example omits `vehicle_location`, but the endpoints we need
  * require it: `vehicle_data` lists `[vehicle_device_data, vehicle_location]`, and
@@ -60,8 +60,8 @@ export function consentRevokeUrl(clientId: string, backUrl: string): string {
  */
 export class FleetConfigError extends Error {
   constructor(message: string) {
-    super(message)
-    this.name = 'FleetConfigError'
+	super(message)
+	this.name = 'FleetConfigError'
   }
 }
 
@@ -73,6 +73,8 @@ export type FleetEnv = {
   appUrl?: string | null
   /** Space-separated. Empty means the pinned `FLEET_SCOPES`. */
   scopeOverride?: string | null
+  /** Optional `vehicle-command` HTTPS proxy base URL. */
+  commandProxyUrl?: string | null
 }
 
 export type FleetConfig = {
@@ -89,6 +91,8 @@ export type FleetConfig = {
   /** Refresh this long before the token actually dies, so a command never races expiry. */
   expirySkewMs: number
   requestTimeoutMs: number
+  /** Optional `vehicle-command` HTTPS proxy used for command-like Fleet endpoints. */
+  commandProxyUrl: string | null
   /**
    * Set when `redirect_uri` does not point at this app's real callback route.
    *
@@ -109,7 +113,7 @@ export function normaliseFleetRegion(value: string | null | undefined): FleetReg
   if (raw === 'na' || raw === 'eu' || raw === 'cn') return raw
   // No silent default. A wrong region mints a token whose audience points at another
   // continent's API, and that fails as a 403 which reads exactly like a scope problem.
-  throw new FleetConfigError(`TESLA_FLEET_REGION must be one of na | eu | cn (got "${raw}"). See docs/TESLA_FLEET_MIGRATION_PLAN.md §4a, C3.`)
+  throw new FleetConfigError(`TESLA_FLEET_REGION must be one of na | eu | cn (got "${raw}"). See docs/TESLA_FLEET_MIGRATION_PLAN.md 4a, C3.`)
 }
 
 /** Pure so the verify harness can pin the shape without touching process.env. */
@@ -120,15 +124,16 @@ export function createFleetConfig(env: FleetEnv): FleetConfig {
   const appUrl = (env.appUrl ?? '').trim().replace(/\/+$/, '')
   const redirectUri = (env.redirectUri ?? '').trim() || (appUrl ? `${appUrl}/api/fleet/callback` : '')
   const apiBaseUrl = REGION_BASE_URLS[region]
+  const commandProxyUrl = (env.commandProxyUrl ?? '').trim().replace(/\/+$/, '') || null
 
   const missing: string[] = []
   if (!clientId) missing.push('TESLA_FLEET_CLIENT_ID')
   if (!clientSecret) missing.push('TESLA_FLEET_CLIENT_SECRET')
   if (!redirectUri) missing.push('TESLA_FLEET_REDIRECT_URI (or NEXT_PUBLIC_APP_URL)')
   if (missing.length) {
-    throw new FleetConfigError(
-      `Fleet API is not configured. Missing: ${missing.join(', ')}. The redirect URI must match the value registered at developer.tesla.com character for character — a mismatch fails the code exchange with invalid_grant, which is otherwise indistinguishable from a bad token.`,
-    )
+	throw new FleetConfigError(
+	  `Fleet API is not configured. Missing: ${missing.join(', ')}. The redirect URI must match the value registered at developer.tesla.com character for character — a mismatch fails the code exchange with invalid_grant, which is otherwise indistinguishable from a bad token.`,
+	)
   }
 
   // The callback route is fixed in this codebase, so a stale URI from the previous build
@@ -137,30 +142,31 @@ export function createFleetConfig(env: FleetEnv): FleetConfig {
   // can refuse instead of spending the code.
   let redirectPathWarning: string | null = null
   try {
-    const path = new URL(redirectUri).pathname
-    if (path !== FLEET_CALLBACK_PATH) {
-      redirectPathWarning = `TESLA_FLEET_REDIRECT_URI points at "${path}", but the only route that can complete the exchange is ${FLEET_CALLBACK_PATH}. Update it — and the value registered at developer.tesla.com — to ${redirectUri.replace(path, FLEET_CALLBACK_PATH)}`
-    }
+	const path = new URL(redirectUri).pathname
+	if (path !== FLEET_CALLBACK_PATH) {
+	  redirectPathWarning = `TESLA_FLEET_REDIRECT_URI points at "${path}", but the only route that can complete the exchange is ${FLEET_CALLBACK_PATH}. Update it — and the value registered at developer.tesla.com — to ${redirectUri.replace(path, FLEET_CALLBACK_PATH)}`
+	}
   } catch {
-    redirectPathWarning = `TESLA_FLEET_REDIRECT_URI is not an absolute URL: "${redirectUri}"`
+	redirectPathWarning = `TESLA_FLEET_REDIRECT_URI is not an absolute URL: "${redirectUri}"`
   }
 
   return {
-    region,
-    apiBaseUrl,
-    audience: apiBaseUrl,
-    tokenUrl: FLEET_TOKEN_URL,
-    authorizeUrl: FLEET_AUTHORIZE_URL,
-    clientId,
-    clientSecret,
-    redirectUri,
-    // Overridable because the set an app can ask for is decided by what was ticked in the
-    // developer portal, and `require_requested_scopes=true` makes that a hard failure rather
-    // than a silently narrowed token.
-    scopes: (env.scopeOverride ?? '').trim() ? (env.scopeOverride as string).trim().split(/\s+/) : [...FLEET_SCOPES],
-    expirySkewMs: 60_000,
-    requestTimeoutMs: 15_000,
-    redirectPathWarning,
+	region,
+	apiBaseUrl,
+	audience: apiBaseUrl,
+	tokenUrl: FLEET_TOKEN_URL,
+	authorizeUrl: FLEET_AUTHORIZE_URL,
+	clientId,
+	clientSecret,
+	redirectUri,
+	// Overridable because the set an app can ask for is decided by what was ticked in the
+	// developer portal, and `require_requested_scopes=true` makes that a hard failure rather
+	// than a silently narrowed token.
+	scopes: (env.scopeOverride ?? '').trim() ? (env.scopeOverride as string).trim().split(/\s+/) : [...FLEET_SCOPES],
+	expirySkewMs: 60_000,
+	requestTimeoutMs: 15_000,
+	commandProxyUrl,
+	redirectPathWarning,
   }
 }
 
@@ -168,14 +174,15 @@ let cached: FleetConfig | null = null
 
 export function fleetConfig(): FleetConfig {
   if (!cached) {
-    cached = createFleetConfig({
-      region: process.env.TESLA_FLEET_REGION,
-      clientId: process.env.TESLA_FLEET_CLIENT_ID,
-      clientSecret: process.env.TESLA_FLEET_CLIENT_SECRET,
-      redirectUri: process.env.TESLA_FLEET_REDIRECT_URI,
-      appUrl: process.env.NEXT_PUBLIC_APP_URL,
-      scopeOverride: process.env.TESLA_FLEET_SCOPES,
-    })
+	cached = createFleetConfig({
+	  region: process.env.TESLA_FLEET_REGION,
+	  clientId: process.env.TESLA_FLEET_CLIENT_ID,
+	  clientSecret: process.env.TESLA_FLEET_CLIENT_SECRET,
+	  redirectUri: process.env.TESLA_FLEET_REDIRECT_URI,
+	  appUrl: process.env.NEXT_PUBLIC_APP_URL,
+	  scopeOverride: process.env.TESLA_FLEET_SCOPES,
+	  commandProxyUrl: process.env.TESLA_HTTP_PROXY_URL,
+	})
   }
   return cached
 }
@@ -184,3 +191,4 @@ export function fleetConfig(): FleetConfig {
 export function resetFleetConfigCache() {
   cached = null
 }
+

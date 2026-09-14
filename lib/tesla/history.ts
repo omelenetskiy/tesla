@@ -21,6 +21,8 @@ const RANGE_MS: Record<Exclude<HistoryRange, 'all'>, number> = {
   '90d': 90 * 86_400_000,
 }
 
+const HISTORY_STALE_MS = 60_000
+
 export function rangeToSince(range: HistoryRange): string | null {
   if (range === 'all') return null
   return new Date(Date.now() - RANGE_MS[range]).toISOString()
@@ -114,7 +116,6 @@ export function deriveTrips(snapshots: SnapshotRow[], vehicleId: string): Trip[]
       id: `${vehicleId}:${first.collected_at}`,
       vehicleId,
       startedAt: first.collected_at,
-      // An unfinished run (car still moving) is explicitly partial, not "just ended".
       endedAt: endReason === 'gap' || endReason === 'stopped' ? last.collected_at : null,
       distanceKm,
       durationMinutes: duration,
@@ -245,7 +246,6 @@ export function deriveBatterySnapshots(snapshots: SnapshotRow[], vehicleId: stri
 async function tableExists(name: string): Promise<boolean> {
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from(name).select('id').limit(1)
-  // PostgREST reports 42P01/42703 for a missing table/view; anything else means it is there.
   if (!error) return true
   return !/relation|does not exist|42P01|Could not find/i.test(error.message ?? '')
 }
@@ -254,17 +254,11 @@ export type HistoryBundle = {
   battery: BatterySnapshot[]
   trips: Trip[]
   charging: ChargingSession[]
-  /** Provenance of what the UI is showing: measured history or reconstructed. */
   origin: 'history_tables' | 'reconstructed_from_snapshots' | 'empty'
-  /** True when the history tables have not been created (migration 005 pending). */
   historyTablesMissing: boolean
   snapshotCount: number
 }
 
-/**
- * Reads history from the persisted tables when they exist, otherwise reconstructs
- * from `vehicle_states` and labels the result. Never returns fabricated points.
- */
 export async function readHistory(vehicleId: string, range: HistoryRange = '30d'): Promise<HistoryBundle> {
   const supabase = getSupabaseAdmin()
   const since = rangeToSince(range)
@@ -293,6 +287,19 @@ export async function readHistory(vehicleId: string, range: HistoryRange = '30d'
     ])
     const hasRows = (tripsResult.data?.length ?? 0) + (chargingResult.data?.length ?? 0) + (batteryResult.data?.length ?? 0) > 0
     if (hasRows) {
+      const latestSnapshotAt = snapshots.at(-1)?.collected_at ?? null
+      const latestBatteryAt = batteryResult.data?.length ? String(batteryResult.data.at(-1)?.collected_at ?? '') : null
+      const tablesLagBehindSnapshots = latestSnapshotAt && (!latestBatteryAt || Date.parse(latestSnapshotAt) - Date.parse(latestBatteryAt) > HISTORY_STALE_MS)
+      if (tablesLagBehindSnapshots) {
+        return {
+          battery: deriveBatterySnapshots(snapshots, vehicleId),
+          trips: deriveTrips(snapshots, vehicleId),
+          charging: deriveChargingSessions(snapshots, vehicleId),
+          origin: 'reconstructed_from_snapshots',
+          historyTablesMissing: false,
+          snapshotCount: snapshots.length,
+        }
+      }
       return {
         battery: mapStoredBattery(batteryResult.data ?? []),
         trips: mapStoredTrips(tripsResult.data ?? [], vehicleId),
@@ -379,13 +386,6 @@ function mapStoredBattery(rows: Array<Record<string, unknown>>): BatterySnapshot
     }))
 }
 
-/**
- * Persists derived history so §8/§9/§10 read measured rows instead of recomputing.
- *
- * Each write is guarded by table existence: with migration 005 unapplied the
- * collector still records snapshots and simply reports what it could not persist,
- * rather than failing the whole collection run.
- */
 export async function persistDerivedHistory(input: { vehicleId: string; ownerId: string; bundle: HistoryBundle }): Promise<PersistReport> {
   const supabase = getSupabaseAdmin()
   const report: PersistReport = { battery: 0, trips: 0, charging: 0, events: 0, skipped: [] }
@@ -481,23 +481,35 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
 
 export type PersistReport = { battery: number; trips: number; charging: number; events: number; skipped: string[] }
 
-/** Returns false only when the table/columns are absent (005 pending), true on success. */
 async function tryUpsert(table: string, rows: Array<Record<string, unknown>>, dedupeKey: string): Promise<boolean> {
   const supabase = getSupabaseAdmin()
-  const { error } = await supabase.from(table).upsert(rows, { onConflict: 'vehicle_id,dedupe_key', ignoreDuplicates: false })
+  const vehicleId = typeof rows[0]?.vehicle_id === 'string' ? rows[0].vehicle_id as string : null
+  const dedupeKeys = rows.map((row) => row.dedupe_key).filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  let pending = rows
+  if (vehicleId && dedupeKeys.length) {
+    const { data, error: existingError } = await supabase.from(table).select('dedupe_key').eq('vehicle_id', vehicleId).in('dedupe_key', dedupeKeys)
+    if (existingError) {
+      if (/Could not find|does not exist|relation|column/i.test(existingError.message ?? '')) return false
+      console.error(`[tesla] read existing ${table} dedupe keys failed (${dedupeKey})`, existingError.message)
+      return false
+    }
+    const existing = new Set((data ?? []).map((row) => String((row as { dedupe_key?: string | null }).dedupe_key ?? '')).filter(Boolean))
+    pending = rows.filter((row) => {
+      const key = typeof row.dedupe_key === 'string' ? row.dedupe_key : null
+      return !key || !existing.has(key)
+    })
+    if (!pending.length) return true
+  }
+
+  const { error } = await supabase.from(table).insert(pending)
   if (!error) return true
-  // A duplicate on a re-run is expected and means the write path works.
   if (/duplicate key|unique/i.test(error.message ?? '')) return true
   if (/Could not find|does not exist|relation|column/i.test(error.message ?? '')) return false
   console.error(`[tesla] persist ${table} failed (${dedupeKey})`, error.message)
   return false
 }
 
-/**
- * Builds the §7 "Recent activity" feed from history boundaries. Rows are stored as a
- * machine-readable `type` plus a data payload; the display string is produced at render
- * time, so a copy change never rewrites history.
- */
 function activityEventsFromHistory(vehicleId: string, ownerId: string, bundle: HistoryBundle) {
   const events: Array<Record<string, unknown>> = []
   for (const trip of bundle.trips.slice(0, 40)) {

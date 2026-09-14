@@ -1,53 +1,4 @@
-# Fleet Telemetry on your own machine
-
-**Read this first: it cannot run fully offline.** Three pinned facts decide the shape of any
-local setup:
-
-1. Tesla's cloud opens an **outbound mTLS connection to your server**, so it must be reachable
-   from the internet. Docs: *"The Fleet Telemetry server must be running on a server exposed to
-   the public internet."*
-2. The `hostname` you send in the config *"must match the root domain (second-level + first-level
-   domain) of the registered application"* — so `telemetry.example.com` is fine if the app is
-   registered on `example.com`, and a random tunnel host is not.
-3. The server certificate *"must be signed by a commonly trusted certificate authority"*. The
-   fleet-telemetry binary is mTLS-only and hard-fails without a cert/key pair.
-
-What that rules out: `localhost`, an `.onion`, a free-tier ngrok random host
-(`*.ngrok-free.app` will not share your app's root domain), and a `mkcert`/private-CA cert.
-
-## The virtual key (do this before anything else)
-
-Tesla's docs use "virtual key" for two unrelated things. The one that matters here is the
-**application key pair**: an EC key on `prime256v1`, whose public half gets registered and whose
-private half signs. The car's own phone key / key card are something else entirely.
-
-> "Before executing a command **or accepting a Fleet Telemetry configuration**, the vehicle
-> ensures the payload is signed by a private key whose public key is present on the vehicle."
-
-Four steps, in order, and the order is load-bearing:
-
-```bash
-./make-key.sh                       # 1. prime256v1 pair into ./keys/, refuses to overwrite
-# 2. publish the public half on the app's own domain:
-#    copy ./keys/public.pem to ../public/.well-known/appspecific/com.tesla.3p.public-key.pem
-#    and verify https://<your-app-domain>/.well-known/appspecific/com.tesla.3p.public-key.pem
-#    serves those exact bytes.
-node --env-file=.env --import ./scripts/register.mjs deploy/fleet-telemetry/register-partner.mts --dry-run
-#    it fetches your URL, compares the served key with the local one, and refuses to register
-#    a domain that does not serve the key — Tesla accepts that registration and then rejects
-#    every signed call much later.
-# 3. register the domain with Tesla (same script without --dry-run; POST /api/1/partner_accounts)
-# 4. install it on the car: open https://tesla.com/_ak/<your-app-domain> as a trusted user and
-#    accept on the vehicle screen. Automatic only for B2B-owned vehicles.
-```
-
-`configure-vehicle.mts` calls `POST /api/1/vehicles/fleet_status` first and prints
-`key paired yes/NO`, so step 4 cannot be silently skipped.
-
-`keys/`, `*.pem`, `*.key` and `*.crt` are gitignored for a reason: a published private key is not
-rotatable in place — the car has to be re-paired by a trusted user, in person, at the screen.
-
-## The recipe that does work locally
+The recipe that does work locally
 
 The trick is that **issuing** a trusted certificate does not require the machine to be reachable,
 if you use DNS validation. Only the inbound TLS connection does, and a tunnel gives you that.
@@ -71,13 +22,16 @@ export TELEMETRY_HOST=telemetry.example.com
 docker compose up -d
 docker compose logs -f fleet-telemetry
 
-# 4. Tell the car where to send. --dry-run first; it prints the exact body.
+# 4. Start the vehicle-command proxy and point the app at it.
+export TESLA_HTTP_PROXY_URL=https://${TELEMETRY_HOST}:4443
+
+# 5. Tell the car where to send. --dry-run first; it prints the exact body.
 node --env-file=.env --import ./scripts/register.mjs \
   deploy/fleet-telemetry/configure-vehicle.mts --dry-run
 node --env-file=.env --import ./scripts/register.mjs \
   deploy/fleet-telemetry/configure-vehicle.mts --hostname=$TELEMETRY_HOST --port=443
 
-# 5. Re-run step 4 after driving once. `synced: true` is the car having adopted it.
+# 6. Re-run step 5 after driving once. `synced: true` is the car having adopted it.
 ```
 
 ## What the config actually looks like
@@ -93,6 +47,61 @@ node --env-file=.env --import ./scripts/register.mjs \
   the car connecting and dropping.
 - `reliable_ack` from the README is **not** a real config field — the Go struct uses
   `reliable_ack_sources`. Copying the README key silently does nothing.
+## What actually worked in this project on 2026-09-14
+
+This is the concrete pattern that is already verified, not a hypothetical recipe.
+
+### Working production topology
+
+- `app.omelenetskiy.xyz` is the Tesla-registered app domain
+- `telemetry.omelenetskiy.xyz` is the telemetry ingress hostname
+- nginx owns the public `:443` on the VM and routes by **SNI**
+- the telemetry receiver runs behind nginx on `127.0.0.1:8443`
+- the vehicle-command proxy stays on `:4443`
+- the VM runtime uses:
+
+```bash
+docker-compose -f docker-compose.sni-router.yml up -d
+```
+
+### Working confirmation sequence
+
+The successful live sequence was:
+
+```bash
+# on the VM
+cd /home/ubuntu/TeslaApp/deploy/fleet-telemetry
+docker-compose -f docker-compose.sni-router.yml up -d
+
+# from the app repo with the Fleet auth and proxy env loaded
+export TESLA_HTTP_PROXY_URL=https://telemetry.omelenetskiy.xyz:4443
+export TELEMETRY_HOST=telemetry.omelenetskiy.xyz
+node --env-file=.env --import ./scripts/register.mjs deploy/fleet-telemetry/configure-vehicle.mts --hostname=$TELEMETRY_HOST --port=443
+```
+
+Observed success signals:
+
+```text
+key paired   yes  firmware 2026.26.6  telemetry client 1.3.0
+create -> {"updated_vehicles":1}
+get    -> {"synced":true,"hostname":"telemetry.omelenetskiy.xyz","key_paired":true,...}
+```
+
+### Important VM caveat: hairpin/self-resolution
+
+During the live config write, the VM could not reliably reach its own public telemetry hostname on
+`:4443`, even though the proxy answered locally. The workaround that unblocked the final config was:
+
+```text
+127.0.0.1 telemetry.omelenetskiy.xyz
+```
+
+in `/etc/hosts` on the VM.
+
+Why this matters:
+- the Fleet command proxy URL still needs the public hostname for Tesla-facing config,
+- but the VM may need local loopback resolution to avoid hairpin timeout when it calls itself.
+
 
 ## Checking it
 
@@ -122,4 +131,72 @@ node --env-file=.env --import ./scripts/register.mjs \
 `config.local.json` and the config keys are taken from the upstream Go struct and README verbatim.
 The tunnel flag names in step 2 are the part I could not verify against current provider docs, so
 treat them as the requirement (raw TLS passthrough, no edge termination) rather than a tested
-command line. Nothing here has been run against a real vehicle.
+command line. Nothing here has been run against a real vehicle## Live proof-of-data already captured
+
+This directory has now been run against a real vehicle. Decoded `record_payload` log entries have
+already been observed for VIN `7SAYGDEFXPF942896`, including sequential `V` frames with fields such
+as `PackVoltage` and `PackCurrent`.
+
+What those lines prove:
+
+- Tesla is reaching the ingress successfully
+- the vehicle is authenticated and synced
+- the receiver is decoding frames, not only accepting TLS
+- `IsResend: false` means the observed rows are live flow, not just replayed backlog
+
+Example log pattern:
+
+```text
+fleet-telemetry_1 | {"msg":"record_payload","metadata":{"txtype":"V","txid":"..."},"data":{"CreatedAt":"2026-09-14T18:55:07Z","PackCurrent":{"doubleValue":-0.4000000059604645},"Vin":"7SAYGDEFXPF942896"}}
+```
+
+So the remaining problem is no longer "make telemetry work". The remaining problem is "persist the
+live stream into the app's own database and UI".
+
+## Bridging the live stream into Supabase
+
+The repo now includes a small ingester that reads decoded telemetry logs and writes them into the
+app-side database. It stores every raw frame in `fleet_telemetry_events` and synthesizes
+`vehicle_states` snapshots so the existing history/UI readers can start using telemetry without a
+new frontend protocol.
+
+Run it on the VM checkout or anywhere that can read the telemetry logs and has the app's Supabase
+service-role env vars:
+
+```bash
+cd /home/ubuntu/TeslaApp
+npm run telemetry:ingest -- --compose-file=deploy/fleet-telemetry/docker-compose.sni-router.yml
+```
+
+For a simple always-on VM loop, use the wrapper in this directory:
+
+```bash
+cd /home/ubuntu/TeslaApp
+bash deploy/fleet-telemetry/run-ingest-loop.sh
+```
+
+Environment knobs:
+
+- `COMPOSE_FILE` — defaults to `deploy/fleet-telemetry/docker-compose.sni-router.yml`
+- `POLL_SECONDS` — defaults to `15`
+- `TAIL_LINES` — defaults to `200`
+
+Or pipe logs explicitly:
+
+```bash
+cd /home/ubuntu/TeslaApp/deploy/fleet-telemetry
+docker-compose -f docker-compose.sni-router.yml logs -f --no-log-prefix fleet-telemetry \
+  | (cd /home/ubuntu/TeslaApp && node --env-file=.env --import ./scripts/register.mjs scripts/ingest-fleet-telemetry.mts --stdin)
+```
+
+Notes:
+
+- apply the latest Supabase migration before first run so `fleet_telemetry_events` exists
+- the ingester accepts both prefixed Compose logs and plain JSON lines
+- existing `/api/history` can already reconstruct battery / trip / charging history from
+  `vehicle_states` when the derived tables are empty
+
+The tunnel flag names in step 2 are still the part to re-check against current provider docs if you
+go back to a tunnel-based topology, so treat them as the requirement (raw TLS passthrough, no edge
+termination) rather than a pinned vendor CLI. The VM-backed SNI-router setup in this repo **has**
+now been run against a real vehicle and is confirmed to receive live telemetry.

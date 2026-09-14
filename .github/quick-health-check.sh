@@ -185,4 +185,3 @@ else
     echo -e "${RED}For troubleshooting, see: .github/TROUBLESHOOTING.md${NC}"
     exit 1
 fi
-

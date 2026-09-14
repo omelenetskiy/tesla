@@ -1,7 +1,11 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { getSupabaseAuthEnv, SUPABASE_AUTH_ENV_ERROR } from '@/lib/supabase-auth-env'
 
 function toAppUrl(path: string, request: NextRequest) {
+  if (process.env.NODE_ENV !== 'production') {
+    return new URL(path, request.url)
+  }
   const canonical = process.env.NEXT_PUBLIC_APP_URL?.trim()
   if (canonical) {
     try {
@@ -13,11 +17,37 @@ function toAppUrl(path: string, request: NextRequest) {
   return new URL(path, request.url)
 }
 
+function isPublicPath(path: string): boolean {
+  const publicPaths = ['/api/fleet/callback', '/.well-known/appspecific/com.tesla.3p.public-key.pem']
+  return (
+    publicPaths.includes(path) ||
+    path.startsWith('/login') ||
+    path.startsWith('/auth') ||
+    path.startsWith('/_next') ||
+    path.startsWith('/maplibre/') ||
+    path.startsWith('/icons/') ||
+    path === '/manifest.webmanifest'
+  )
+}
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
+  const path = request.nextUrl.pathname
+  const isPublic = isPublicPath(path)
+  const isApi = path.startsWith('/api/')
+  const supabaseEnv = getSupabaseAuthEnv()
+
+  if (!supabaseEnv) {
+    if (isPublic) return response
+    if (isApi) {
+      return NextResponse.json({ message: SUPABASE_AUTH_ENV_ERROR }, { status: 503 })
+    }
+    return NextResponse.redirect(toAppUrl('/login?supabase=not-configured', request))
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseEnv.url,
+    supabaseEnv.anonKey,
     {
       cookies: {
         getAll() {
@@ -36,24 +66,12 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const path = request.nextUrl.pathname
-  const publicPaths = ['/api/fleet/callback', '/.well-known/appspecific/com.tesla.3p.public-key.pem']
-
-  const isPublic =
-    publicPaths.includes(path) ||
-    path.startsWith('/login') ||
-    path.startsWith('/auth') ||
-    path.startsWith('/_next') ||
-    path.startsWith('/maplibre/') ||
-    path.startsWith('/icons/') ||
-    path === '/manifest.webmanifest'
-
   if (!user && !isPublic) {
+    if (isApi) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
     return NextResponse.redirect(toAppUrl('/login', request))
   }
 
   const fleetAuthorized = request.cookies.get('fleet_authorized')?.value === '1'
-  const isApi = path.startsWith('/api/')
   const canConnectFleet =
     path === '/tesla-login' ||
     path === '/settings' ||

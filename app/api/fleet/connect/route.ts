@@ -7,6 +7,9 @@ import { FleetConfigError, fleetConfig } from '@/lib/fleet/config'
 export const dynamic = 'force-dynamic'
 
 function toAppUrl(path: string, request: Request) {
+  if (process.env.NODE_ENV !== 'production') {
+    return new URL(path, request.url)
+  }
   const canonical = process.env.NEXT_PUBLIC_APP_URL?.trim()
   if (canonical) {
     try {

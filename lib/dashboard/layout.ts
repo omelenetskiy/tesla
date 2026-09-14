@@ -16,7 +16,7 @@
  */
 
 /** Every widget on the dashboard. The id is the storage key, so renaming one loses placements. */
-export const DASHBOARD_CARDS = ['vehicle', 'battery', 'climate', 'battery-health', 'energy', 'realtime', 'location', 'charging', 'health', 'tyre'] as const
+export const DASHBOARD_CARDS = ['vehicle', 'overview', 'battery', 'location'] as const
 export type DashboardCardId = (typeof DASHBOARD_CARDS)[number]
 
 export type Placement = { i: DashboardCardId; x: number; y: number; w: number; h: number }
@@ -57,17 +57,11 @@ export const MAX_COLUMNS = 4
 const HALF = 2
 
 export const CARD_SPEC: Record<DashboardCardId, CardSpec> = {
-  vehicle: { w: HALF, h: 372 },
-  battery: { w: HALF, h: 168 },
-  climate: { w: HALF, h: 140 },
-  'battery-health': { w: HALF, h: 160 },
-  // The one widget that starts across the whole row, so its line chart is not a stamp.
-  energy: { w: 4, h: 170 },
-  realtime: { w: HALF, h: 190 },
+  // The hero card wants the full row, because the vehicle render is now the page's anchor.
+  vehicle: { w: HALF, h: 332 },
+  overview: { w: HALF, h: 236 },
+  battery: { w: HALF, h: 174 },
   location: { w: HALF, h: 340 },
-  charging: { w: HALF, h: 150 },
-  health: { w: HALF, h: 160 },
-  tyre: { w: HALF, h: 150 },
 }
 
 /**
@@ -87,11 +81,9 @@ export function columnsFor(width: number): number {
 }
 
 /**
- * The reading order the screen was designed around: what the car is and how much is left
- * down the left, where it is and what would need attention down the right, and the energy
- * summary last so it lands across the bottom once both columns have run out.
+ * Dashboard default order: identity + system on top, battery + map below.
  */
-const DEFAULT_ORDER: DashboardCardId[] = ['vehicle', 'battery', 'climate', 'battery-health', 'realtime', 'location', 'charging', 'health', 'tyre', 'energy']
+const DEFAULT_ORDER: DashboardCardId[] = ['vehicle', 'overview', 'battery', 'location']
 
 /**
  * Array order is part of the layout, not a detail of it.
@@ -256,7 +248,6 @@ export function fitToColumns(layout: DashboardLayout, columns: number): Placemen
 export function commitReport(reported: Placement[], previous: DashboardLayout, columns: number): DashboardLayout {
   if (columns >= MAX_COLUMNS) {
     return reported.map((placement) => {
-      const spec = CARD_SPEC[placement.i]
       const stored = previous.find((entry) => entry.i === placement.i) ?? placement
       return {
         ...stored,

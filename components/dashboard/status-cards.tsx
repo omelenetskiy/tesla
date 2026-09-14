@@ -1,13 +1,15 @@
 'use client'
 
 import * as React from 'react'
+import Link from 'next/link'
 import { Activity, BatteryMedium, Car, DoorClosed, Navigation, PlugZap, Timer, Thermometer, Lock, Unlock, ShieldCheck, Siren, Box, Gauge as GaugeIcon } from 'lucide-react'
 import { Card, Figure, Meter, SpeedGauge, Sparkline, StateWord, type Tone } from '@/components/dashboard/cards'
 import { VehicleMap, type MapMarker } from '@/components/map/vehicle-map'
-import type { ChargingConnection, Trip, VehiclePresence, VehicleStatus } from '@/lib/tesla/models'
+import type { ChargingConnection, Connectivity, Trip, VehiclePresence, VehicleStatus, VehicleSummary } from '@/lib/tesla/models'
 import type { PlaceLabel } from '@/lib/geo/place'
+import { useGeolocation } from '@/lib/hooks/use-geolocation'
 import { anyPartOpen } from '@/lib/tesla/models'
-import { DASH, formatAge, formatBar, formatDateTimeShort, formatDistanceShort, formatKm, formatKmh, formatKw, formatKwh, formatKwhPer100Km, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration } from '@/lib/format'
+import { DASH, formatAge, formatBar, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatKwhPer100Km, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration } from '@/lib/format'
 import { TIRE_HIGH_PSI, TIRE_LOW_PSI } from '@/lib/tesla/alerts'
 import { cn } from '@/lib/utils'
 
@@ -45,6 +47,12 @@ const CONNECTION_WORD: Record<ChargingConnection, string> = {
   unknown: 'No reading',
 }
 
+const CONNECTIVITY_WORD: Record<Connectivity, string> = {
+  online: 'Online',
+  asleep: 'Asleep',
+  offline: 'Offline',
+}
+
 /**
  * Tesla's `trim_badging` is a code, not a word. Only the mapping that is documented is
  * applied; anything unrecognised adds nothing to the name rather than guessing at a
@@ -60,13 +68,20 @@ export function modelBadge(status: VehicleStatus): string {
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
 
-export function DashboardHeader({ status, ageSeconds, onResetLayout }: { status: VehicleStatus; ageSeconds: number; onResetLayout?: () => void }) {
+export function DashboardHeader({ vehicle, status, ageSeconds, onResetLayoutAction }: { vehicle: VehicleSummary | null; status: VehicleStatus | null; ageSeconds: number; onResetLayoutAction?: () => void }) {
+  const connectivity = status?.connectivity ?? vehicle?.connectivity ?? null
   const link: { word: string; tone: Tone } =
-    status.connectivity === 'online' ? { word: 'Connected', tone: 'ok' } : status.connectivity === 'asleep' ? { word: 'Asleep', tone: 'warn' } : { word: 'Offline', tone: 'muted' }
+    connectivity === 'online'
+      ? { word: 'Connected', tone: 'ok' }
+      : connectivity === 'asleep'
+        ? { word: 'Asleep', tone: 'warn' }
+        : connectivity === 'offline'
+          ? { word: 'Offline', tone: 'muted' }
+          : { word: 'Summary mode', tone: 'muted' }
 
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 pb-3">
-      <h1 className="min-w-0 truncate text-[19px] font-semibold tracking-[-0.02em] text-ink sm:text-[22px]">{modelBadge(status)}</h1>
+      <h1 className="min-w-0 truncate text-[19px] font-semibold tracking-[-0.02em] text-ink sm:text-[22px]">{status ? modelBadge(status) : vehicle?.displayName ?? 'Dashboard'}</h1>
       <span className="flex items-center gap-1.5 text-[12.5px] text-ink-secondary">
         <span className={cn('size-2 rounded-full', link.tone === 'ok' ? 'bg-ok' : link.tone === 'warn' ? 'bg-warn' : 'bg-ink-tertiary')} aria-hidden />
         {link.word}
@@ -76,8 +91,8 @@ export function DashboardHeader({ status, ageSeconds, onResetLayout }: { status:
           forgets the arrangement the operator dragged together. Only offered once there is
           an arrangement to forget, so the glanceable default stays free of a button that
           would do nothing. */}
-      {onResetLayout && (
-        <button type="button" onClick={onResetLayout} className="h-7 rounded-md border border-line px-2.5 text-[11.5px] font-medium text-ink-secondary transition hover:bg-surface-muted hover:text-ink">
+      {onResetLayoutAction && (
+        <button type="button" onClick={onResetLayoutAction} className="h-7 rounded-md border border-line px-2.5 text-[11.5px] font-medium text-ink-secondary transition hover:bg-surface-muted hover:text-ink">
           Reset layout
         </button>
       )}
@@ -87,12 +102,16 @@ export function DashboardHeader({ status, ageSeconds, onResetLayout }: { status:
 
 /* ── Vehicle ─────────────────────────────────────────────────────────────── */
 
-export function VehicleCard({ status, place }: { status: VehicleStatus; place: PlaceLabel | null }) {
-  const hasPosition = status.drive.latitude !== null && status.drive.longitude !== null
-  const where = place?.label ?? (hasPosition ? 'Position reported, place unknown' : 'No position reported')
+export function VehicleCard({ vehicle, status }: { vehicle: VehicleSummary | null; status: VehicleStatus | null }) {
+  const name = status?.displayName ?? vehicle?.displayName ?? 'Tesla vehicle'
+  const model = vehicle?.modelLabel ?? status?.config.displayModel ?? 'Vehicle connected through the backend'
+  const presence = status?.presence ?? vehicle?.presence ?? null
+  const firmware = status?.state.softwareVersion ?? status?.state.updateVersion ?? 'not reported'
+  const odometer = status?.state.odometerKm !== null && status?.state.odometerKm !== undefined ? formatDistanceShort(status.state.odometerKm) : 'not reported'
+  const vin = maskVin(status?.identity.vin ?? vehicle?.identity.vin ?? null)
 
   return (
-    <Card icon={Car} title="Vehicle" aside={<StateWord tone={status.presence === 'driving' || status.presence === 'charging' ? 'ok' : 'muted'}>{PRESENCE_WORD[status.presence]}</StateWord>}>
+    <Card icon={Car} title="Vehicle" aside={presence ? <StateWord tone={presence === 'driving' || presence === 'charging' ? 'ok' : 'muted'}>{PRESENCE_WORD[presence]}</StateWord> : <StateWord>Not linked</StateWord>}>
       <div className="vehicle-stage -mx-1 flex items-center justify-center">
         {/* The render is a stand-in for the body style, not a picture of this car: it is
             the same silhouette whatever the vehicle's actual paint, so it never claims a
@@ -117,28 +136,97 @@ export function VehicleCard({ status, place }: { status: VehicleStatus; place: P
         />
       </div>
 
-      <div className="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <p className="truncate text-[15px] font-semibold leading-5 text-ink">{status.displayName}</p>
-          <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12.5px] text-ink-secondary">
-            <Navigation className="size-3 shrink-0 text-ink-tertiary" aria-hidden />
-            <span className="truncate">{where}</span>
-          </p>
-        </div>
-        <div className="text-right">
-          <p className="font-mono text-[20px] font-semibold leading-6 tracking-[-0.02em] text-ink tabular-nums">{formatKmh(status.drive.speedKmh ?? 0)}</p>
-          <p className="text-[11px] text-ink-tertiary">
-            {status.state.odometerKm !== null ? `${formatKm(status.state.odometerKm)} total` : 'odometer not reported'}
-          </p>
-        </div>
+      <div className="mt-3 min-w-0 space-y-1">
+        <p className="truncate text-[17px] font-semibold leading-6 text-ink">{name}</p>
+        <p className="truncate text-[13px] text-ink-secondary">{model}</p>
+      </div>
+
+      <div className="mt-4 grid gap-2.5 sm:grid-cols-3">
+        <Metric label="Firmware" value={firmware} />
+        <Metric label="Odometer" value={odometer} />
+        <Metric label="VIN" value={vin} />
       </div>
     </Card>
   )
 }
 
+export function OverviewCard({ vehicle, status, ageSeconds }: {
+  vehicle: VehicleSummary | null
+  status: VehicleStatus | null
+  ageSeconds: number
+}) {
+  const connectivity = status?.connectivity ?? vehicle?.connectivity ?? null
+  const tone: Tone = connectivity === 'online' ? 'ok' : connectivity === 'asleep' ? 'warn' : 'muted'
+  const lastSeen = vehicle?.lastSeenAt ? formatDateTimeShort(vehicle.lastSeenAt) : 'not reported'
+  const modelCode = status?.config.modelCode ?? 'not reported'
+  const wheel = status?.config.wheelType ?? 'not reported'
+  const drivetrain =
+    status?.config.allWheelDrive === null || status?.config.allWheelDrive === undefined
+      ? 'not reported'
+      : status.config.allWheelDrive
+        ? 'AWD'
+        : 'RWD'
+  const updateStatus = status?.state.updateStatus ?? 'not reported'
+  const updateVersion = status?.state.updateVersion ?? 'not reported'
+  const connectivityWord = connectivity ? CONNECTIVITY_WORD[connectivity] : 'not reported'
+  const ageWord = Number.isFinite(ageSeconds) ? formatAge(ageSeconds) : 'not reported'
+
+  return (
+    <Card icon={Activity} title="System" aside={<StateWord tone={tone}>{connectivityWord}</StateWord>} contentClassName="space-y-3">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[12.5px]">
+        <MiniText label="Vehicle" value={vehicle?.displayName ?? 'Not selected'} />
+        <MiniText label="Model" value={vehicle?.modelLabel ?? status?.config.displayModel ?? 'not reported'} />
+        <MiniText label="Model code" value={modelCode} />
+        <MiniText label="Drivetrain" value={drivetrain} />
+        <MiniText label="Wheels" value={wheel} />
+        <MiniText label="Update status" value={updateStatus} />
+        <MiniText label="Update version" value={updateVersion} />
+        <MiniText label="Last record" value={lastSeen} />
+        <MiniText label="Snapshot age" value={ageWord} />
+      </div>
+    </Card>
+  )
+}
+
+export function ShortcutsCard() {
+  return (
+    <Card icon={Navigation} title="Shortcuts" contentClassName="space-y-2.5">
+      <Link href="/settings" className="flex items-center justify-between rounded-lg border border-line bg-surface-muted/60 px-3 py-2.5 text-[13px] font-medium text-ink transition hover:bg-surface-muted">
+        <span>Open settings</span>
+        <span className="text-ink-tertiary">→</span>
+      </Link>
+      <Link href="/trips" className="flex items-center justify-between rounded-lg border border-line bg-surface-muted/60 px-3 py-2.5 text-[13px] font-medium text-ink transition hover:bg-surface-muted">
+        <span>Open trips</span>
+        <span className="text-ink-tertiary">→</span>
+      </Link>
+      <p className="pt-1 text-[11.5px] leading-4 text-ink-tertiary">
+        Settings stays the entry point for backend connection. Trips remains the place for historical driving data.
+      </p>
+    </Card>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-surface-muted/60 px-3 py-2.5">
+      <p className="text-[11px] uppercase tracking-[0.06em] text-ink-tertiary">{label}</p>
+      <p className="mt-1 text-[13px] font-medium text-ink">{value}</p>
+    </div>
+  )
+}
+
 /* ── Battery ─────────────────────────────────────────────────────────────── */
 
-export function BatteryCard({ status }: { status: VehicleStatus }) {
+export function BatteryCard({ status }: { status: VehicleStatus | null }) {
+  if (!status) {
+    return (
+      <Card icon={BatteryMedium} title="Battery">
+        <Figure value={DASH} unit="%" tone="muted" label="range not reported" />
+        <p className="mt-3 text-[11.5px] leading-4 text-ink-tertiary">Battery details appear when a vehicle snapshot is available.</p>
+      </Card>
+    )
+  }
+
   const charge = status.charge
   const soc = charge.stateOfCharge
   const low = soc !== null && soc <= 20
@@ -199,10 +287,12 @@ function FigureLine({ label, value }: { label: string; value: string }) {
 
 /* ── Location ────────────────────────────────────────────────────────────── */
 
-export function LocationCard({ status, place, ageSeconds }: { status: VehicleStatus; place: PlaceLabel | null; ageSeconds: number }) {
-  const has = status.drive.latitude !== null && status.drive.longitude !== null
+export function LocationCard({ status, place, ageSeconds }: { status: VehicleStatus | null; place: PlaceLabel | null; ageSeconds: number }) {
+  const has = Boolean(status && status.drive.latitude !== null && status.drive.longitude !== null)
+  const { position: fallbackPosition } = useGeolocation(!has)
+  const center = !has && fallbackPosition ? { longitude: fallbackPosition[0], latitude: fallbackPosition[1] } : null
   const markers = React.useMemo<MapMarker[]>(() => {
-    if (!has) return []
+    if (!has || !status) return []
     return [{ id: 'vehicle', kind: 'vehicle', longitude: status.drive.longitude!, latitude: status.drive.latitude!, label: status.displayName, heading: status.drive.heading, presence: status.presence }]
   }, [status, has])
 
@@ -214,26 +304,33 @@ export function LocationCard({ status, place, ageSeconds }: { status: VehicleSta
       contentClassName="space-y-3"
     >
       <VehicleMap
+        center={center}
         markers={markers}
         className="h-[210px] w-full sm:h-[240px]"
         placeholder={
           <div className="flex h-full items-center justify-center px-6 text-center">
             <p className="max-w-[300px] text-[12.5px] leading-5 text-ink-tertiary">
-              The vehicle is not reporting a position. It will appear here as soon as one is in the snapshot — the map is not loaded to draw an empty world.
+              {status
+                ? 'The vehicle is not reporting a position. It will appear here as soon as one is in the snapshot.'
+                : 'Position appears after the backend receives a vehicle snapshot.'}
             </p>
           </div>
         }
       />
       <div className="min-w-0 shrink-0">
         <p className="truncate text-[15px] font-semibold leading-5 text-ink">
-          {place?.city ?? place?.label ?? (has ? 'Place not resolved' : 'No position')}
+          {place?.city ?? place?.label ?? (has ? 'Place not resolved' : 'No position yet')}
         </p>
         <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">
-          {place ? [place.district, place.postcode, place.country].filter(Boolean).join(' · ') || 'Last known location' : has ? 'Last known location' : 'Waiting for a fix'}
+          {place
+            ? [place.district, place.postcode, place.country].filter(Boolean).join(' · ') || 'Last known location'
+            : has
+              ? 'Last known location'
+              : 'Waiting for location data'}
         </p>
         {has && (
           <p className="mt-1 font-mono text-[11.5px] text-ink-tertiary">
-            {status.drive.latitude!.toFixed(5)}, {status.drive.longitude!.toFixed(5)}
+            {status!.drive.latitude!.toFixed(5)}, {status!.drive.longitude!.toFixed(5)}
           </p>
         )}
       </div>
@@ -285,6 +382,21 @@ function Mini({ label, value }: { label: string; value: string }) {
       <p className="mt-0.5 truncate font-mono text-[13.5px] text-ink tabular-nums">{value}</p>
     </div>
   )
+}
+
+function MiniText({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] text-ink-tertiary">{label}</p>
+      <p className="mt-0.5 truncate text-[13.5px] text-ink">{value}</p>
+    </div>
+  )
+}
+
+function maskVin(vin: string | null): string {
+  if (!vin) return 'not reported'
+  if (vin.length <= 8) return vin
+  return `${vin.slice(0, 3)}****${vin.slice(-5)}`
 }
 
 /* ── Climate ────────────────────────────────────────────────────────────── */

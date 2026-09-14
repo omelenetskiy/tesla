@@ -70,6 +70,11 @@ export function formatBar(psi: number | null | undefined): string {
   return `${number(psiToBar(psi), 1)} bar`
 }
 
+export function formatPsi(psi: number | null | undefined): string {
+  if (psi === null || psi === undefined || !Number.isFinite(psi)) return DASH
+  return `${number(psi, 1)} psi`
+}
+
 /** kWh/100 km from Wh/km — the unit the car's own screen uses. */
 export function formatKwhPer100Km(whPerKm: number | null | undefined): string {
   if (whPerKm === null || whPerKm === undefined || !Number.isFinite(whPerKm)) return DASH

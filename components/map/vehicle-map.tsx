@@ -101,7 +101,7 @@ function markerElement(marker: MapMarker): HTMLElement {
     const heading = typeof marker.heading === 'number' && marker.heading > 0 ? marker.heading : 0
     element.innerHTML =
       `<span class="map-marker-halo"></span>` +
-      `<svg class="map-marker-arrow" viewBox="0 0 24 24" aria-hidden style="transform:rotate(${heading}deg)"><path d="M12 1.6 19.4 21.8 12 17.2 4.6 21.8Z"/></svg>`
+      `<svg class="map-marker-arrow" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${heading}deg)"><path d="M12 1.6 19.4 21.8 12 17.2 4.6 21.8Z"/></svg>`
   } else if (marker.kind === 'user') {
     element.innerHTML = `<span class="map-marker-you"></span>`
   } else {
@@ -188,10 +188,6 @@ export function VehicleMap(props: VehicleMapProps) {
   const [styleReady, setStyleReady] = React.useState(false)
 
   const vehicle = markers.find((marker) => marker.kind === 'vehicle') ?? null
-  // The camera sits on the vehicle if there is one, otherwise on the first real feature
-  // (a trip's start/destination), and only then on the caller's fallback centre. A
-  // `user` marker never anchors the view: it is the browser's location, shown only while
-  // there is nothing of the vehicle's to look at.
   const anchor = vehicle ?? markers.find((marker) => marker.kind !== 'user') ?? center
   const routeCoords = React.useMemo<Array<[number, number]>>(() => route.filter(isFinitePoint), [route])
   const hasRoute = routeCoords.length >= 2
@@ -199,8 +195,6 @@ export function VehicleMap(props: VehicleMapProps) {
   const focusLon = anchor?.longitude ?? null
   const focusLat = anchor?.latitude ?? null
 
-  // Declared before the init effect so the ref is populated by the time it runs, and
-  // without assigning during render, which React Compiler rejects.
   React.useEffect(() => {
     targetRef.current = focusLon !== null && focusLat !== null ? [focusLon, focusLat] : null
   }, [focusLon, focusLat])
@@ -216,7 +210,6 @@ export function VehicleMap(props: VehicleMapProps) {
       center: target,
       zoom,
       attributionControl: false,
-      // The Tesla browser has no hover and no wheel; one-finger drag and pinch stay on.
       scrollZoom: false,
       doubleClickZoom: false,
       dragRotate: false,
@@ -229,20 +222,12 @@ export function VehicleMap(props: VehicleMapProps) {
     modeRef.current = resolved
     setStyleReady(false)
 
-    /**
-     * `resize()` preserves the camera *offset*, not the centre. A container that measured
-     * wrong at construction time therefore keeps its marker off-centre forever, which is
-     * why every re-measure re-asserts the target instead of trusting the camera.
-     */
     const settle = () => {
       const next = targetRef.current
       if (!next || parkedRef.current) return
       map.setCenter(next)
     }
 
-    // MapLibre reads the container's size when constructed. Inside a CSS grid the element
-    // is frequently still measuring at that moment — a canvas that fills only part of its
-    // box is the classic result. Re-measure on every container resize.
     let torn = false
     const observer = new ResizeObserver(() => {
       if (torn) return
@@ -251,10 +236,6 @@ export function VehicleMap(props: VehicleMapProps) {
     })
     observer.observe(container)
 
-    // A style that never arrives and a tile host that never answer look identical from the
-    // driver's seat, so say which one failed and offer a retry. Only errors before the
-    // first frame count: afterwards a single failing tile is a network blip, and replacing
-    // a working map with an error card would be worse than the blip.
     let loaded = false
     let earlyErrors = 0
     const onError = (event: maplibregl.ErrorEvent) => {
@@ -279,8 +260,6 @@ export function VehicleMap(props: VehicleMapProps) {
       parkedRef.current = true
     })
 
-    // Captured for the cleanup: by then the ref itself may point at a different
-    // registry, from a map that was rebuilt underneath this one.
     const registry = markersRef.current
 
     return () => {
@@ -293,28 +272,14 @@ export function VehicleMap(props: VehicleMapProps) {
       registry.forEach((entry) => entry.marker.remove())
       registry.clear()
     }
-    // `resolved` and `zoom` are read only to build the initial view: a theme change is
-    // applied by the setStyle effect below, which must not tear the map down. `failed` is
-    // deliberately not a dependency — flipping it must not rebuild the map underneath the
-    // error card. `attempt` is the only way back in.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt])
 
-  // Theme swap: re-style in place. DOM markers are not part of the style, so they survive;
-  // the tiles are unchanged and already cached (OpenFreeMap sends `max-age=315360000`).
-  //
-  // Only an actual change, though. This effect also runs on mount, where `resolved` is by
-  // definition the mode the map was just constructed with — and `setStyle` with a fresh
-  // object cannot be diffed against a style that is still loading, so MapLibre logs
-  // "Unable to perform style diff: Style is not done loading" and rebuilds the style from
-  // scratch, throwing away the source that was mid-handshake with its TileJSON. The result
-  // is a map that paints its background layer and never asks for a tile.
   React.useEffect(() => {
     const map = mapRef.current
     if (!map || modeRef.current === resolved) return
     modeRef.current = resolved
     map.setStyle(styleFor(resolved))
-    // The new style needs its own layer pass before route layers can be re-added.
     setStyleReady(false)
     const onLoaded = () => setStyleReady(true)
     map.once('load', onLoaded)
@@ -323,7 +288,6 @@ export function VehicleMap(props: VehicleMapProps) {
     }
   }, [resolved])
 
-  // Route line — one source, updated in place so a re-render does not thrash layers.
   React.useEffect(() => {
     const map = mapRef.current
     if (!map || !styleReady) return
@@ -335,7 +299,6 @@ export function VehicleMap(props: VehicleMapProps) {
     if (!existing) {
       if (!data) return
       map.addSource('route', { type: 'geojson', data })
-      // Casing under stroke keeps the line readable over both basemap modes.
       const casingColor = resolved === 'dark' ? '#0b0e12' : '#ffffff'
       map.addLayer({ id: 'route-casing', type: 'line', source: 'route', paint: { 'line-color': casingColor, 'line-width': 7, 'line-opacity': 0.85 } } as maplibregl.LineLayerSpecification)
       map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 3.5, 'line-opacity': 0.95 } } as maplibregl.LineLayerSpecification)
@@ -353,13 +316,10 @@ export function VehicleMap(props: VehicleMapProps) {
     if (!map || !fitRoute || !hasRoute) return
     const first = routeCoords[0]
     const bounds = routeCoords.reduce((acc, point) => acc.extend(point), new maplibregl.LngLatBounds(first, first))
-    // Past the source's native ceiling, fitting only overzooms one tile.
     map.fitBounds(bounds, { padding: 56, duration: 500, maxZoom: SOURCE_MAX_ZOOM })
     parkedRef.current = true
   }, [routeCoords, hasRoute, fitRoute, styleReady])
 
-  // Markers keyed by id; only changed ones are rebuilt, so a moving car does not flicker.
-  // DOM overlays, so they go on immediately — no waiting for tiles.
   React.useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -384,8 +344,6 @@ export function VehicleMap(props: VehicleMapProps) {
     }
   }, [markers, styleReady, attempt])
 
-  // Follow the vehicle without stealing the user's pan; a fitted route owns the camera.
-  // Only a vehicle fix moves the view — a trip's endpoints are static.
   React.useEffect(() => {
     const map = mapRef.current
     if (!map || !follow || !vehicle || hasRoute || parkedRef.current) return
@@ -406,7 +364,7 @@ export function VehicleMap(props: VehicleMapProps) {
       {failed && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-canvas/95 px-6 text-center">
           <p className="text-[13px] font-medium text-ink">Map data could not be loaded</p>
-          <p className="max-w-[340px] text-[12px] leading-4 text-ink-secondary">
+          <p className="max-w-85 text-[12px] leading-4 text-ink-secondary">
             The vehicle position is still correct — only the basemap is missing. This browser could not reach tiles.openfreemap.org, which is usually a filtered
             network or a DNS blocklist rather than an outage.
           </p>
