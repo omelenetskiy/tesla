@@ -1,4 +1,4 @@
-VC/**
+/**
  * Configure the car to stream to your receiver, and read the result back.
  *
  *   node --env-file=.env --import ./scripts/register.mjs \
