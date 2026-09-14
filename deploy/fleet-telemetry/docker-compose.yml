@@ -6,11 +6,8 @@ services:
     image: tesla/fleet-telemetry:v0.9.4
     command: ["/fleet-telemetry", "-config=/etc/fleet-telemetry/config.json"]
     network_mode: host
+    user: root
     restart: unless-stopped
     volumes:
       - ./config.local.json:/etc/fleet-telemetry/config.json:ro
       - ./certs:/etc/fleet-telemetry/certs:ro
-    ports:
-      # Ignored under network_mode: host, kept so the file also works without it.
-      - "443:443"
-      - "9090:9090"
