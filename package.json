@@ -14,7 +14,11 @@
     "check:deploy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register.mjs scripts/check-deployment.mts",
     "verify": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register.mjs scripts/verify-tesla.mts",
     "telemetry:ingest": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register.mjs scripts/ingest-fleet-telemetry.mts",
-    "telemetry:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register.mjs scripts/test-fleet-telemetry-ingest.mts"
+    "telemetry:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/register.mjs scripts/test-fleet-telemetry-ingest.mts",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:dry": "bash scripts/deploy.sh --dry-run",
+    "deploy:sync-only": "bash scripts/deploy.sh --skip-build",
+    "git:init": "bash scripts/init-git.sh"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.20",
