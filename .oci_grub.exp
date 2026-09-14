@@ -1,0 +1,17 @@
+set timeout 40
+log_user 1
+set proxycmd {ssh -i ~/.ssh/ssh-key-2026-09-13.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -W %h:%p -p 443 ocid1.instanceconsoleconnection.oc1.eu-frankfurt-1.antheljt74jhmvycqurg27hkczcmahmq6jj4c4cmm4y4f2rmjw3ztlcngizq@instance-console.eu-frankfurt-1.oci.oraclecloud.com}
+spawn ssh -tt -i ~/.ssh/ssh-key-2026-09-13.key -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=20 -o ProxyCommand=$proxycmd ocid1.instance.oc1.eu-frankfurt-1.antheljt74jhmvycjhj5ynqvga3sh7blyr2sff2lzjbi4pmsmsh37kc66y7q
+for {set i 0} {$i < 30} {incr i} {
+  after 250
+  send -- "\033"
+}
+expect {
+  -re {(GNU GRUB|grub>|
+Minimal BASH-like line editing)} { send_user "SAW_GRUB\n"; exit 0 }
+  -re {login:\s*$} { send_user "SAW_LOGIN\n"; exit 2 }
+  -re {Password:\s*$} { send_user "SAW_PASSWORD\n"; exit 3 }
+  eof { send_user "EOF\n"; exit 4 }
+  timeout { send_user "TIMEOUT\n"; exit 5 }
+}
+

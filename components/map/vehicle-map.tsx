@@ -127,14 +127,25 @@ function firstConfigured(values: Array<string | undefined>): string | undefined 
   return undefined
 }
 
+/** Theme overrides are accepted only when both light and dark URLs are configured. */
+function themeStyleOverride(mode: 'light' | 'dark'): string | undefined {
+  const light = firstConfigured([process.env.NEXT_PUBLIC_MAP_STYLE_URL_LIGHT])
+  const dark = firstConfigured([process.env.NEXT_PUBLIC_MAP_STYLE_URL_DARK])
+  if (light || dark) {
+    if (!light || !dark) return undefined
+    return mode === 'dark' ? dark : light
+  }
+  return firstConfigured([process.env.NEXT_PUBLIC_MAP_STYLE_URL])
+}
+
 /**
  * The basemap style for a theme.
  *
- * `NEXT_PUBLIC_MAP_STYLE_URL_LIGHT` / `_DARK` pick a hosted style per theme — the pair
- * that ships in `.env` is OpenFreeMap's positron for light and fiord for dark. A single
- * `NEXT_PUBLIC_MAP_STYLE_URL` still works and applies to both themes. Each accepts a style
- * URL or inlined style JSON; empty means the style this app builds itself
- * (`lib/map/basemap.ts`), which needs no style request and no sprite.
+ * `NEXT_PUBLIC_MAP_STYLE_URL_LIGHT` / `_DARK` pick a hosted style per theme and are used
+ * only as a complete pair. If one is missing, both are ignored and the built-in light/dark
+ * pair is used instead. A single `NEXT_PUBLIC_MAP_STYLE_URL` still works and applies to
+ * both themes. Each accepts a style URL or inlined style JSON; empty means the style this
+ * app builds itself (`lib/map/basemap.ts`), which needs no style request and no sprite.
  *
  * A hosted style is not free: positron is 25 KB of JSON on the critical path of a cold
  * open and drags in a 77 KB sprite for POI icons, which the built-in style has none of.
@@ -144,10 +155,7 @@ function firstConfigured(values: Array<string | undefined>): string | undefined 
  * a `NEXT_PUBLIC_` value is inlined at build time, and `process.env[name]` would not be.
  */
 function styleFor(mode: 'light' | 'dark'): maplibregl.StyleSpecification | string {
-  const override = firstConfigured([
-    mode === 'dark' ? process.env.NEXT_PUBLIC_MAP_STYLE_URL_DARK : process.env.NEXT_PUBLIC_MAP_STYLE_URL_LIGHT,
-    process.env.NEXT_PUBLIC_MAP_STYLE_URL,
-  ])
+  const override = themeStyleOverride(mode)
   if (!override) return buildBasemapStyle(mode)
   if (override.startsWith('{')) {
     try {
