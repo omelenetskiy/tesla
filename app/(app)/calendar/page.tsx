@@ -32,7 +32,7 @@ export default function CalendarPage() {
           <h1 className="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-ink sm:text-[32px]">{selectedDate}</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">Verified drives for this day.</p>
         </div>
-          <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
           <div className="relative">
             <Button type="button" color="secondary" size="sm" aria-label="Open calendar picker" iconLeading={Calendar} onPress={() => setCalendarOpen((open) => !open)}>
             </Button>
@@ -42,8 +42,8 @@ export default function CalendarPage() {
               </Card>
             ) : null}
           </div>
-          <Button href={`/day/${selectedDate}`} color="secondary" size="sm" iconTrailing={ArrowRight}>Open day report</Button>
-          <Button href="/trips" color="primary" size="sm" iconTrailing={ArrowRight}>All trips</Button>
+            <Button href={`/day/${selectedDate}`} color="secondary" size="sm" iconTrailing={ArrowRight} className="shrink-0">Open day report</Button>
+            <Button href="/trips" color="primary" size="sm" iconTrailing={ArrowRight} className="shrink-0">All trips</Button>
         </div>
       </section>
 
