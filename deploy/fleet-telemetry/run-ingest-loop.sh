@@ -5,10 +5,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/fleet-telemetry/docker-compose.sni-router.yml}"
 SERVICE="${SERVICE:-fleet-telemetry}"
 POLL_SECONDS="${POLL_SECONDS:-15}"
-CURSOR_FILE="${CURSOR_FILE:-/var/lib/fleet-telemetry/ingest-cursor.utc}"
+CURSOR_FILE="${CURSOR_FILE:-}"
 OVERLAP_SECONDS="${OVERLAP_SECONDS:-30}"
 
 cd "$ROOT_DIR"
+CURSOR_FILE="${CURSOR_FILE:-$ROOT_DIR/.fleet-telemetry/ingest-cursor.utc}"
 mkdir -p "$(dirname "$CURSOR_FILE")"
 
 while true; do
