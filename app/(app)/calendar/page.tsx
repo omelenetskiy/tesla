@@ -7,15 +7,15 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useDayTrips } from '@/lib/hooks/use-day-trips'
-import { localDateKey, recentDateKeys, summarizeTrips } from '@/lib/utils/daily'
+import { localDateKey, summarizeTrips } from '@/lib/utils/daily'
 import { formatKwhPer100Km } from '@/lib/format'
+import { DayCalendar } from '@/components/application/calendar/day-calendar'
 
 export default function CalendarPage() {
   const today = localDateKey(new Date().toISOString())
   const [selectedDate, setSelectedDate] = useState(today)
   const { trips, loading, error, origin, snapshotCount } = useDayTrips(selectedDate)
   const summary = summarizeTrips(trips)
-  const days = recentDateKeys(7)
 
   return (
     <div className="mx-auto w-full max-w-[1180px] space-y-4">
@@ -33,14 +33,9 @@ export default function CalendarPage() {
           </div>
       </section>
 
-      <div className="grid grid-cols-4 gap-2 overflow-x-auto pb-1 sm:grid-cols-7">
-        {days.map((day) => (
-          <button key={day} type="button" onClick={() => setSelectedDate(day)} className={`min-w-[86px] rounded-2xl border px-3 py-3 text-left transition-colors ${day === selectedDate ? 'border-accent bg-accent-soft' : 'border-line bg-surface hover:bg-surface-muted'}`}>
-            <span className="block text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{day === today ? 'Today' : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' })}</span>
-            <span className="mt-1 block font-mono text-lg font-semibold text-ink">{day.slice(8)}</span>
-          </button>
-        ))}
-      </div>
+      <Card className="max-w-xl p-5 sm:p-6">
+        <DayCalendar selectedDate={selectedDate} onChange={setSelectedDate} />
+      </Card>
 
       {error ? <Card className="border-danger p-5 text-sm text-danger">{error.message}</Card> : null}
 
