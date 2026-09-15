@@ -24,9 +24,49 @@ export function useDayTrips(date: string, timeZone?: string): DayTripsResult {
         setLoading(true)
         const response = await fetch('/api/trips?range=7d', { cache: 'no-store' })
         if (!response.ok) throw new Error('Unable to load recent trips')
-        const payload = (await response.json()) as { trips?: Trip[]; origin?: string; snapshotCount?: number }
+        const payload = (await response.json()) as {
+          trips?: Array<{
+            id: string
+            startTime: string
+            endTime: string
+            distance: number | null
+            durationMinutes: number | null
+            energyUsedKwh: number | null
+            efficiency: number | null
+            maxSpeed: number | null
+            avgSpeed: number | null
+            startLocation: Trip['startLocation']
+            endLocation: Trip['endLocation']
+            confidence: Trip['confidence']
+            partial: boolean
+          }>
+          origin?: string
+          snapshotCount?: number
+        }
         if (cancelled) return
-        setAllTrips(payload.trips ?? [])
+        setAllTrips((payload.trips ?? []).map((trip) => ({
+          id: trip.id,
+          vehicleId: '',
+          startedAt: trip.startTime,
+          endedAt: trip.endTime,
+          distanceKm: trip.distance,
+          durationMinutes: trip.durationMinutes,
+          averageSpeedKmh: trip.avgSpeed,
+          maxSpeedKmh: trip.maxSpeed,
+          energyUsedKwh: trip.energyUsedKwh,
+          efficiencyWhPerKm: trip.efficiency,
+          batteryStartPercent: null,
+          batteryEndPercent: null,
+          odometerStartKm: null,
+          odometerEndKm: null,
+          startLocation: trip.startLocation,
+          endLocation: trip.endLocation,
+          route: [],
+          name: null,
+          phase: 'unknown',
+          partial: trip.partial,
+          confidence: trip.confidence,
+        })))
         setOrigin(payload.origin ?? null)
         setSnapshotCount(payload.snapshotCount ?? 0)
         setError(null)

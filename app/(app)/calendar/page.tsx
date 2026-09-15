@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { useDayTrips } from '@/lib/hooks/use-day-trips'
-import { localDateKey, summarizeTrips } from '@/lib/utils/daily'
+import { localDateKey, recentDateKeys, summarizeTrips } from '@/lib/utils/daily'
 import { formatKwhPer100Km } from '@/lib/format'
 import { DayCalendar } from '@/components/application/calendar/day-calendar'
 
@@ -16,6 +16,7 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState(today)
   const { trips, loading, error, origin, snapshotCount } = useDayTrips(selectedDate)
   const summary = summarizeTrips(trips)
+  const days = recentDateKeys(14)
 
   return (
     <div className="mx-auto w-full max-w-[1180px] space-y-4">
@@ -32,6 +33,21 @@ export default function CalendarPage() {
             <Button asChild variant="outline"><Link href="/trips">All trips <ArrowRight /></Link></Button>
           </div>
       </section>
+
+      <div className="-mx-1 flex snap-x gap-2 overflow-x-auto px-1 pb-1" aria-label="Recent days">
+        {days.map((day) => (
+          <button
+            key={day}
+            type="button"
+            onClick={() => setSelectedDate(day)}
+            aria-pressed={day === selectedDate}
+            className={`flex min-w-[92px] snap-start flex-col rounded-2xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent ${day === selectedDate ? 'border-accent bg-accent-soft text-ink' : 'border-line bg-surface text-ink-secondary hover:bg-surface-muted'}`}
+          >
+            <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{day === today ? 'Today' : new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short' })}</span>
+            <span className="mt-1 font-mono text-lg font-semibold">{day.slice(8)}</span>
+          </button>
+        ))}
+      </div>
 
       <Card className="max-w-xl p-5 sm:p-6">
         <DayCalendar selectedDate={selectedDate} onChange={setSelectedDate} />
