@@ -24,8 +24,8 @@ describe('telemetry session sample writer', () => {
 
     expect(plan).toEqual([
       expect.objectContaining({ session_id: 'charge-1', session_type: 'charging', field_name: 'battery_level', numeric_value: 72 }),
-      expect.objectContaining({ field_name: 'voltage_v', numeric_value: 400 }),
-      expect.objectContaining({ field_name: 'current_a', numeric_value: 25 }),
+      expect.objectContaining({ field_name: 'voltage', numeric_value: 400 }),
+      expect.objectContaining({ field_name: 'current', numeric_value: 25 }),
       expect.objectContaining({ field_name: 'charge_state', numeric_value: null, text_value: 'Charging' }),
     ])
   })

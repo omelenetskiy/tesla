@@ -26,16 +26,16 @@ type RpcClient = {
 
 const FIELD_MAP: Record<string, { name: string; numeric: boolean }> = {
   Soc: { name: 'battery_level', numeric: true },
-  EstBatteryRange: { name: 'estimated_range_km', numeric: true },
-  IdealBatteryRange: { name: 'ideal_range_km', numeric: true },
-  VehicleSpeed: { name: 'speed_kmh', numeric: true },
-  Odometer: { name: 'odometer_km', numeric: true },
-  ChargerVoltage: { name: 'voltage_v', numeric: true },
-  ChargeAmps: { name: 'current_a', numeric: true },
-  ChargePower: { name: 'power_kw', numeric: true },
-  Power: { name: 'power_kw', numeric: true },
-  OutsideTemp: { name: 'outside_temperature_c', numeric: true },
-  InsideTemp: { name: 'inside_temperature_c', numeric: true },
+    EstBatteryRange: { name: 'estimated_range', numeric: true },
+    IdealBatteryRange: { name: 'ideal_range', numeric: true },
+    VehicleSpeed: { name: 'speed', numeric: true },
+    Odometer: { name: 'odometer', numeric: true },
+    ChargerVoltage: { name: 'voltage', numeric: true },
+    ChargeAmps: { name: 'current', numeric: true },
+    ChargePower: { name: 'power', numeric: true },
+    Power: { name: 'power', numeric: true },
+    OutsideTemp: { name: 'outside_temperature', numeric: true },
+    InsideTemp: { name: 'inside_temperature', numeric: true },
   DetailedChargeState: { name: 'charge_state', numeric: false },
 }
 
