@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase'
 import type { BatterySnapshot, ChargingSession, Trip, VehicleStatus } from './models'
-import { milesToKm, normalizeChargingConnection } from './normalize'
+import { normalizeChargingConnection } from './normalize'
 
 /**
  * History reads and trip/charging derivation.
@@ -351,7 +351,8 @@ function mapStoredTrips(rows: Array<Record<string, unknown>>, vehicleId: string)
       : row.energy_used != null
         ? Number(row.energy_used)
         : null
-    const distanceKm = row.distance_km != null ? Number(row.distance_km) : milesToKm(row.distance as number | undefined)
+    const distanceValue = row.distance_km ?? row.distance
+    const distanceKm = distanceValue == null || !Number.isFinite(Number(distanceValue)) ? null : Number(distanceValue)
     const storedEfficiency = row.efficiency_wh_per_km != null ? Number(row.efficiency_wh_per_km) : null
     return {
     id: String(row.id),
@@ -411,7 +412,10 @@ function mapStoredBattery(rows: Array<Record<string, unknown>>): BatterySnapshot
       at: String(row.collected_at),
       stateOfCharge: Number(row.battery_level),
       usableStateOfCharge: row.usable_battery_level != null ? Number(row.usable_battery_level) : null,
-      ratedRangeKm: row.rated_range_km != null ? Number(row.rated_range_km) : milesToKm(row.battery_range as number | undefined),
+      ratedRangeKm: (() => {
+        const value = row.rated_range_km ?? row.battery_range
+        return value == null || !Number.isFinite(Number(value)) ? null : Number(value)
+      })(),
       presence: ((row.presence as BatterySnapshot['presence']) ?? 'parked'),
       chargingConnection: normalizeChargingConnection(row.charging_state as string | undefined),
       odometerKm: row.odometer_km != null ? Number(row.odometer_km) : null,
@@ -558,4 +562,4 @@ function activityEventsFromHistory(vehicleId: string, ownerId: string, bundle: H
   return events
 }
 
-export { milesToKm }
+

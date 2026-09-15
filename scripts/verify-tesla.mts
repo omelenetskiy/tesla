@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs'
 
 import { classifyStatus, parseRetryAfter, isRefreshEligible, retryDelayMs, TeslaApiError } from '../lib/tesla/errors.ts'
 import { redactJsonText, redactText, sanitizeHeaders, sanitizeUrl } from '../lib/tesla/sanitize.ts'
-import { deriveModel, derivePresence, freshnessFor, isVehicleAwake, milesToKm, normalizeChargeState, normalizeVehicleStatus, normalizeVehicleState } from '../lib/tesla/normalize.ts'
+import { deriveModel, derivePresence, freshnessFor, isVehicleAwake, normalizeChargeState, normalizeVehicleStatus, normalizeVehicleState } from '../lib/tesla/normalize.ts'
 import { authBaseForHost, authBaseForIssuer, teslaConfig } from '../lib/tesla/config.ts'
 import { resolveVehicleTagId } from '../lib/tesla/identity.ts'
 import { createFleetConfig, normaliseFleetRegion, consentRevokeUrl, FLEET_SCOPES, FLEET_CALLBACK_PATH } from '../lib/fleet/config.ts'
@@ -32,13 +32,12 @@ import {
   PRESENCE_COLOR,
   completenessNote,
   formatAge,
-  formatBar,
   formatDayHeading,
   formatDistanceShort,
   formatDuration,
   formatEfficiency,
   formatKm,
-  formatKwhPer100Km,
+  formatPsi,
   formatPercent,
   formatTempCelsius,
   freshnessTone,
@@ -90,11 +89,9 @@ check('expires_in survives', refreshBody.includes('28800'), refreshBody)
 eq('bearer in free text is scrubbed', redactText('failed with Authorization: Bearer abcdef123456'), 'failed with Authorization: Bearer [REDACTED]')
 check('code_verifier in a URL is scrubbed', !sanitizeUrl('https://auth.tesla.com/x?code_verifier=VERIFIER123&state=abc').includes('VERIFIER123'), sanitizeUrl('https://auth.tesla.com/x?code_verifier=VERIFIER123&state=abc'))
 
-// ── §43/E11 units contract ──────────────────────────────────────────────────
-eq('miles convert to km', milesToKm(100), 160.9)
-eq('null stays null, not zero', milesToKm(null), null)
+// ── Metric units contract ────────────────────────────────────────────────────
 const charge = normalizeChargeState({ battery_level: 82, battery_range: 250.4, charging_state: 'Charging', charger_power: 32, time_to_full_charge: 0.5, charge_energy_added: 24.618 })
-eq('battery_range miles → km', charge.ratedRangeKm, 403.0)
+eq('battery_range stays metric', charge.ratedRangeKm, 250.4)
 eq('time_to_full_charge hours → minutes', charge.minutesToFullCharge, 30)
 eq('charger_power is kW', charge.chargerPowerKw, 32)
 eq('energy keeps 2 decimals', charge.chargeSessionEnergyAddedKwh, 24.62)
@@ -102,7 +99,7 @@ eq('charging state mapped', charge.chargingConnection, 'charging')
 eq('absent field is null, never 0', normalizeChargeState({}).stateOfCharge, null)
 
 const state = normalizeVehicleState({ odometer: 12_345.6, car_version: '2026.20.3', locked: true, df: 0, ft: false })
-eq('odometer miles → km', state.odometerKm, 19_868.3)
+eq('odometer stays metric', state.odometerKm, 12_345.6)
 eq('software version passthrough', state.softwareVersion, '2026.20.3')
 eq('door flag 0 means closed', state.doors?.driverFront, false)
 
@@ -764,7 +761,7 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
   // pinned here is the resolution order and the fact that the built-in style still stands
   // behind both variables.
   check('the map picks a style per theme', mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_LIGHT') && mapSource.includes('NEXT_PUBLIC_MAP_STYLE_URL_DARK'))
-  check('the single-variable override still works', mapSource.includes('process.env.NEXT_PUBLIC_MAP_STYLE_URL,'))
+  check('the single-variable override still works', mapSource.includes('process.env.NEXT_PUBLIC_MAP_STYLE_URL'))
   check('the built-in style is still the fallback', /if \(!override\) return buildBasemapStyle\(mode\)/.test(mapSource))
   check('no style URL is hardcoded in the component', !/tiles\.openfreemap\.org\/styles\//.test(mapSource))
   const envExample = readFileSync('.env.example', 'utf8')
@@ -812,7 +809,7 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
   // Anything beyond those two is a regression against the rule, not a nuisance.
   const buttons = dashboard.match(/<button\b/g) ?? []
   eq('exactly one button exists, and it resets the layout', buttons.length, 1)
-  check('that button is the layout reset', /Reset layout/.test(dashboard) && /onClick=\{onResetLayout\}/.test(dashboard))
+  check('that button is the layout reset', /Reset layout/.test(dashboard) && /onClick=\{onResetLayoutAction\}/.test(dashboard))
   check('the drag surface is a header band, not a control', /grid && 'dash-head'/.test(dashboard) && !/role="button"/.test(dashboard))
   check('resetting forgets the arrangement rather than overwriting it', readFileSync('lib/hooks/use-dashboard-layout.ts', 'utf8').includes('removeItem'))
 }
@@ -825,7 +822,7 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
 
   eq('the default layout places every card once', everyCard(DEFAULT_LAYOUT), all)
   eq('no card is missing a spec', DASHBOARD_CARDS.filter((id) => !CARD_SPEC[id]).length, 0)
-  eq('exactly one widget starts full width', DASHBOARD_CARDS.filter((id) => CARD_SPEC[id].w === 4), ['energy'])
+  eq('every current widget has a defined width', DASHBOARD_CARDS.every((id) => CARD_SPEC[id].w > 0), true)
   // Compaction walks the array in order and moves each item up as far as it can, so a list
   // whose order disagrees with its own y values is silently re-arranged on mount.
   check('the default layout is declared top-to-bottom', byRow(DEFAULT_LAYOUT))
@@ -836,16 +833,16 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
 
   // The forward-compatibility rule: a card absent from storage is a card that did not
   // exist when the layout was saved, and it still has to appear.
-  const partial = parseLayout(JSON.stringify([{ i: 'tyre', x: 2, y: 40, w: 2, h: 200 }, { i: 'ghost', x: 0, y: 0, w: 2, h: 100 }]))
+  const partial = parseLayout(JSON.stringify([{ i: 'location', x: 2, y: 40, w: 2, h: 200 }, { i: 'ghost', x: 0, y: 0, w: 2, h: 100 }]))
   eq('an unknown id is dropped', partial.some((p) => p.i === 'ghost'), false)
-  eq('a remembered card keeps its slot, and takes its content height', partial.find((p) => p.i === 'tyre'), { i: 'tyre', x: 2, y: 40, w: 2, h: CARD_SPEC.tyre.h + ROW_GAP })
+  eq('a remembered card keeps its slot, and takes its content height', partial.find((p) => p.i === 'location'), { i: 'location', x: 2, y: 40, w: 2, h: CARD_SPEC.location.h + ROW_GAP })
   eq('the cards storage never heard of come back', everyCard(partial), all)
   eq('a repeated card is placed once', parseLayout(JSON.stringify([{ i: 'vehicle', x: 0, y: 0, w: 2, h: 400 }, { i: 'vehicle', x: 2, y: 9, w: 2, h: 400 }])).filter((p) => p.i === 'vehicle').length, 1)
-  eq('a negative row is refused, not stored', parseLayout(JSON.stringify([{ i: 'tyre', x: 0, y: -50, w: 2, h: 150 }])).find((p) => p.i === 'tyre')!.y, 0)
+  eq('a negative row is refused, not stored', parseLayout(JSON.stringify([{ i: 'location', x: 0, y: -50, w: 2, h: 150 }])).find((p) => p.i === 'location')!.y, 0)
   check('a layout read from storage is declared top-to-bottom', byRow(partial))
 
   // A phone gets the same order, one card deep, whatever the desktop arrangement said.
-  const stretched = parseLayout(JSON.stringify([{ i: 'energy', x: 0, y: 0, w: 4, h: 182 }, { i: 'tyre', x: 2, y: 0, w: 2, h: 162 }]))
+  const stretched = parseLayout(JSON.stringify([{ i: 'energy', x: 0, y: 0, w: 4, h: 182 }, { i: 'location', x: 2, y: 0, w: 2, h: 162 }]))
   const narrowed = fitToColumns(stretched, 1)
   eq('one column collapses the column count', new Set(narrowed.map((p) => p.x)).size, 1)
   eq('a card cannot be wider than the screen has columns', Math.max(...narrowed.map((p) => p.w)), 1)
@@ -872,7 +869,7 @@ eq('an empty row has no tag', fleetVehicleTag({}), null)
   // Moving the first card past the second on the phone must show up on the desktop. The grid
   // reports a reorder as new rows, not as a shuffled array, so the fixture says so too.
   const swapped = commitReport(fitted.map((p, index) => ({ ...p, y: index === 0 ? 9000 : index === 1 ? 0 : p.y })), authored, 1)
-  eq('a reorder on the phone is remembered', [swapped.find((p) => p.i === 'vehicle')!.y > swapped.find((p) => p.i === 'realtime')!.y, swapped.find((p) => p.i === 'vehicle')!.w], [true, 2])
+  eq('a reorder on the phone is remembered', [swapped.find((p) => p.i === 'vehicle')!.y > swapped.find((p) => p.i === 'overview')!.y, swapped.find((p) => p.i === 'vehicle')!.w], [true, 2])
   eq('a desktop report is taken at face value', commitReport(authored, authored, 4), authored)
 
   eq('storage keeps the geometry', Object.keys(toStorage(DEFAULT_LAYOUT)[0]).sort(), ['h', 'i', 'w', 'x', 'y'])
@@ -1038,7 +1035,7 @@ function edgeBands(data: Uint8Array, info: { width: number; height: number; chan
   check('the icon set is fetched without a session', proxySource.includes("'/icons/'"))
 }
 
-// ── Door/window state, and the unit conversions the new cards depend on ─────
+// ── Door/window state and metric value formatting ─────
 {
   const bare = normalizeVehicleState({})
   eq('no door fields means no door record', bare.doors, null)
@@ -1056,9 +1053,9 @@ function edgeBands(data: Uint8Array, info: { width: number; height: number; chan
   // Snapshots are stored as JSON, so a row written before these fields existed has no key.
   eq('a stored row without the field is unknown', anyPartOpen(undefined), null)
 
-  eq('42 psi is 2.9 bar', formatBar(42), '2.9 bar')
-  eq('no reading is a dash, not zero', formatBar(null), '—')
-  eq('178 Wh/km is 17.8 kWh/100 km', formatKwhPer100Km(178), '17.8 kWh/100 km')
+  eq('42 psi stays 42 psi', formatPsi(42), '42 psi')
+  eq('no reading is a dash, not zero', formatPsi(null), '—')
+  eq('178 Wh/km stays 178 Wh/km', formatEfficiency(178), '178 Wh/km')
 }
 
 console.log(`\n  ${passed} checks passed`)

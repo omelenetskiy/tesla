@@ -12,22 +12,10 @@ import type {
   Connectivity,
 } from './models'
 
-const MILES_TO_KM = 1.609344
-
 /**
- * Units contract (plan §5 / fixes E11).
- *
- * The previous code asserted three different things about the same field: the raw
- * type comment said km/h, the normaliser comment said "documented in mph; no
- * conversion needed", and the UI labelled the result km. Fleet API reports
- * `battery_range`/`est_battery_range`/`ideal_battery_range`/`odometer` in miles and
- * temperatures in °C, while `speed` follows the vehicle's own unit setting — so
- * `speed` is passed through and every distance field is converted exactly once.
+ * Units contract: the vehicle is configured for metric units. Values are passed
+ * through unchanged and only validated/rounded for the application model.
  */
-export function milesToKm(miles: number | undefined | null): number | null {
-  return typeof miles === 'number' && Number.isFinite(miles) ? Math.round(miles * MILES_TO_KM * 10) / 10 : null
-}
-
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
@@ -376,13 +364,13 @@ export function normalizeChargeState(raw: Partial<RawChargeState> | undefined): 
   return {
     stateOfCharge: num(raw?.battery_level),
     usableStateOfCharge: num(raw?.usable_battery_level),
-    ratedRangeKm: milesToKm(raw?.battery_range ?? raw?.rated_battery_range),
-    estimatedRangeKm: milesToKm(raw?.est_battery_range),
-    idealRangeKm: milesToKm(raw?.ideal_battery_range),
+    ratedRangeKm: rounded(num(raw?.battery_range ?? raw?.rated_battery_range)),
+    estimatedRangeKm: rounded(num(raw?.est_battery_range)),
+    idealRangeKm: rounded(num(raw?.ideal_battery_range)),
     chargeLimitPercent: num(raw?.charge_limit_soc),
     chargingConnection: normalizeChargingConnection(raw?.charging_state),
     chargeSessionEnergyAddedKwh: rounded(num(raw?.charge_energy_added), 2),
-    chargeSessionAddedRangeKm: milesToKm(raw?.charge_miles_added_rated),
+    chargeSessionAddedRangeKm: rounded(num(raw?.charge_miles_added_rated)),
     chargerPowerKw: rounded(num(raw?.charger_power), 1),
     chargerVoltage: rounded(num(raw?.charger_voltage), 1),
     chargerActualCurrentA: rounded(num(raw?.charger_actual_current), 1),
@@ -432,8 +420,8 @@ export function normalizeVehicleState(raw: Partial<RawVehicleState> | undefined)
     rearPassenger: flag(raw?.rp_window),
   }
   return {
-    odometerKm: milesToKm(raw?.odometer),
-    rawOdometerMiles: num(raw?.odometer),
+    odometerKm: rounded(num(raw?.odometer)),
+    rawOdometer: num(raw?.odometer),
     softwareVersion: str(raw?.car_version) ?? str(raw?.software_update?.version),
     locked: bool(raw?.locked),
     // A record where every part is absent is reported as null rather than as four
@@ -448,7 +436,7 @@ export function normalizeVehicleState(raw: Partial<RawVehicleState> | undefined)
     tirePressurePsi: pressures
       ? { frontLeft: num(pressures.fl), frontRight: num(pressures.fr), rearLeft: num(pressures.rl), rearRight: num(pressures.rr) }
       : null,
-    lastDriveDistanceKm: milesToKm(raw?.last_drive_average_distance),
+    lastDriveDistanceKm: rounded(num(raw?.last_drive_average_distance)),
     minutesSinceLastDrive: num(raw?.minutes_since_last_drive),
     userPresentMinutes: raw?.user_present === undefined ? null : raw.user_present ? 0 : null,
     wifiName: str(raw?.wifi_name),

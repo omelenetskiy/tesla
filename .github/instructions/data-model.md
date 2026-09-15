@@ -16,7 +16,7 @@ Analytics and presentation
 
 Application models in `lib/tesla/models.ts` use canonical metric units and nullable fields. Presentation labels belong in formatting/UI code, not stored domain models.
 
-Canonical units are km, km/h, kW, kWh, Wh/km, °C, percentages, and minutes. Fleet miles/range/odometer values must be converted exactly once; preserve raw values where auditability requires it. Never treat missing data as zero.
+Canonical units are km, km/h, kW, kWh, Wh/km, °C, percentages, and minutes. This vehicle is configured to report metric values, so range, odometer, speed, temperature, and other configured readings pass through unchanged; do not apply a second unit conversion. Never treat missing data as zero.
 
 ## Core entities
 
@@ -59,3 +59,4 @@ A time-series battery observation containing SOC, usable SOC when available, rat
 ## Relationships and provenance
 
 A Vehicle has many positions, telemetry samples, states, drives, charging sessions, trips, battery snapshots, software updates, and timeline events. Drives and charging sessions may contribute to trips and timeline events. Analytics must reference their source samples/time coverage and distinguish measured, normalized, estimated, and unavailable values.
+

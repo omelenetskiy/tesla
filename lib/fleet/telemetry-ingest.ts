@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from '@/lib/supabase'
 import type { VehicleStatus, VehicleState, DriveState, ChargeState, ClimateState, VehicleConfig, ShiftState } from '@/lib/tesla/models'
-import { derivePresence, milesToKm, normalizeChargingConnection } from '@/lib/tesla/normalize'
+import { derivePresence, normalizeChargingConnection } from '@/lib/tesla/normalize'
 import { listAllVehicleRows, newestSnapshot, type VehicleRow } from '@/lib/tesla/service'
 import { persistDerivedHistory, readHistory } from '@/lib/tesla/history'
 
@@ -109,7 +109,7 @@ function emptyClimateState(): ClimateState {
 function emptyVehicleState(): VehicleState {
   return {
     odometerKm: null,
-    rawOdometerMiles: null,
+    rawOdometer: null,
     softwareVersion: null,
     locked: null,
     doors: null,
@@ -407,7 +407,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'EstBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.estimatedRangeKm = milesToKm(value)
+          status.charge.estimatedRangeKm = Math.round(value * 10) / 10
           if (status.charge.ratedRangeKm === null) status.charge.ratedRangeKm = status.charge.estimatedRangeKm
           mapped = true
         }
@@ -416,7 +416,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'IdealBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.idealRangeKm = milesToKm(value)
+          status.charge.idealRangeKm = Math.round(value * 10) / 10
           mapped = true
         }
         break
@@ -455,8 +455,8 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'Odometer': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.state.rawOdometerMiles = value
-          status.state.odometerKm = milesToKm(value)
+          status.state.rawOdometer = value
+          status.state.odometerKm = value
           mapped = true
         }
         break
@@ -466,7 +466,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'VehiclePower': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.drive.powerKw = Math.round((value / 1000) * 10) / 10
+          status.drive.powerKw = value
           mapped = true
         }
         break

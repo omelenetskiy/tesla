@@ -1,15 +1,4 @@
-'use client'
-
-import * as React from 'react'
-import Link from 'next/link'
-import { Activity, BatteryMedium, Car, DoorClosed, Navigation, PlugZap, Timer, Thermometer, Lock, Unlock, ShieldCheck, Siren, Box, Gauge as GaugeIcon } from 'lucide-react'
-import { Card, Figure, Meter, SpeedGauge, Sparkline, StateWord, type Tone } from '@/components/dashboard/cards'
-import { VehicleMap, type MapMarker } from '@/components/map/vehicle-map'
-import type { ChargingConnection, Connectivity, Trip, VehiclePresence, VehicleStatus, VehicleSummary } from '@/lib/tesla/models'
-import type { PlaceLabel } from '@/lib/geo/place'
-import { useGeolocation } from '@/lib/hooks/use-geolocation'
-import { anyPartOpen } from '@/lib/tesla/models'
-import { DASH, formatAge, formatBar, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatKwhPer100Km, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration } from '@/lib/format'
+Bar, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatKwhPer100Km, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration } from '@/lib/format'
 import { TIRE_HIGH_PSI, TIRE_LOW_PSI } from '@/lib/tesla/alerts'
 import { cn } from '@/lib/utils'
 
@@ -20,7 +9,7 @@ import { cn } from '@/lib/utils'
  *
  * **Read-only.** Nothing here sends anything to the vehicle. The spec this screen was
  * written against bans controls outright, and it happens to be the right call for a
- * display mounted in a car — but the more durable reason is that every element on this
+import { DASH, formatAge, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration, formatPsi, formatEfficiency } from '@/lib/format'
  * surface is a *claim about the car*, and a claim should not also be a button.
  *
  * **No invented numbers.** Several figures in the design brief (remaining kWh, pack
@@ -536,8 +525,8 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
         <p className="text-[11.5px] leading-4 text-ink-tertiary">Consumption is measured per trip, from the energy the pack lost over the distance driven.</p>
       ) : (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-ink-tertiary">
-          <span>{average === null ? 'Average unavailable' : `${formatKwhPer100Km(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
-          {newest.distanceKm != null && <span>{formatDistanceShort(newest.distanceKm)} on the last one</span>}
+        value={last === null ? DASH : Math.round(last).toString()}
+        unit="Wh/km"
         </div>
       )}
     </Card>
@@ -547,7 +536,7 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
 /* ── Tyres ───────────────────────────────────────────────────────────────── */
 
 export function TyreCard({ status }: { status: VehicleStatus }) {
-  const pressures = status.state.tirePressurePsi
+          <span>{average === null ? 'Average unavailable' : `${formatEfficiency(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
   const wheels: Array<{ key: keyof NonNullable<typeof pressures>; label: string }> = [
     { key: 'frontLeft', label: 'FL' },
     { key: 'frontRight', label: 'FR' },
@@ -575,10 +564,5 @@ export function TyreCard({ status }: { status: VehicleStatus }) {
       <p className="mt-2.5 text-[11.5px] leading-4 text-ink-tertiary">
         {stale
           ? 'The vehicle reports tyre pressure only after the sensors have woken, so a car that has been asleep for a while shows nothing here.'
-          : `Highlighted outside ${formatBar(TIRE_LOW_PSI)}–${formatBar(TIRE_HIGH_PSI)}, the same band the alerts use. Cold inflation for this car is about ${formatBar(42)}.`}
-      </p>
-    </Card>
-  )
-}
-
-export { PRESENCE_WORD }
+          : `Highlighted outside ${formatBar(TIRE_LOW_PSI)}–${formatBar(TIRE_HIGH_PSI)}, the same band the alerts use. Cold inflation for this car is about ${formatBar                {psi === null ? DASH : formatPsi(psi)}
+          : `Highlighted outside ${formatPsi(TIRE_LOW_PSI)}–${formatPsi(TIRE_HIGH_PSI)}, the same band the alerts use. Cold inflation for this car is about ${formatPsi(42)}.`}

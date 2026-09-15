@@ -29,9 +29,9 @@ Use the server/service-role client only where the existing server-side data path
 
 ## Telemetry and units
 
-Raw Fleet events are retained for audit/replay in the telemetry tables. Normalize into canonical application units before persistence or calculation. Current project conventions are metric: km, km/h, kW, kWh, Wh/km, °C. Fleet range/odometer values that are in miles require one explicit conversion; do not convert already-normalized values again. Preserve raw values when needed for audit.
+Raw Fleet events are retained for audit/replay in the telemetry tables. Normalize provider shapes into application models, but do not transform configured metric readings. Current project conventions are metric: km, km/h, kW, kWh, Wh/km, °C; this vehicle reports those configured readings directly. Only convert a field when the verified provider contract explicitly says its unit differs from the configured application unit, and never convert an already-normalized value again.
 
-Pack voltage/current and direct power fields must be validated and converted according to the verified provider contract. Energy is power integrated over time; exclude invalid or unjustified gaps and report provenance. Do not use SOC as a calibrated power meter unless the product explicitly defines an estimate.
+Pack voltage/current and direct power fields must be validated according to the verified provider contract. Computing power from voltage/current is a derived physical calculation, not a display-unit rewrite. Energy is power integrated over time; exclude invalid or unjustified gaps and report provenance. Do not use SOC as a calibrated power meter unless the product explicitly defines an estimate.
 
 ## Expected failures
 
@@ -42,3 +42,4 @@ A sleeping vehicle is not necessarily broken. Do not turn missing state into zer
 ## Polling and commands
 
 Polling must be centralized in the existing server/feed path; do not create independent polling loops in React components. Respect timeouts, freshness, rate limits, and sleep state. Vehicle controls/commands are secondary product functionality and require separately verified endpoints, scopes, confirmation, and safe error handling.
+

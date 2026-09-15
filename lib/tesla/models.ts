@@ -137,7 +137,7 @@ export function anyPartOpen<T extends Record<string, boolean | null>>(part: T | 
 
 export type VehicleState = {
   odometerKm: number | null
-  rawOdometerMiles: number | null
+  rawOdometer: number | null
   softwareVersion: string | null
   locked: boolean | null
   /**
