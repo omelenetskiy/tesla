@@ -1,4 +1,15 @@
-Bar, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatKwhPer100Km, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration } from '@/lib/format'
+'use client'
+
+import * as React from 'react'
+import Link from 'next/link'
+import { Activity, BatteryMedium, Car, DoorClosed, Navigation, PlugZap, Timer, Thermometer, Lock, Unlock, ShieldCheck, Siren, Box, Gauge as GaugeIcon } from 'lucide-react'
+import { Card, Figure, Meter, SpeedGauge, Sparkline, StateWord, type Tone } from '@/components/dashboard/cards'
+import { VehicleMap, type MapMarker } from '@/components/map/vehicle-map'
+import type { ChargingConnection, Connectivity, Trip, VehiclePresence, VehicleStatus, VehicleSummary } from '@/lib/tesla/models'
+import type { PlaceLabel } from '@/lib/geo/place'
+import { useGeolocation } from '@/lib/hooks/use-geolocation'
+import { anyPartOpen } from '@/lib/tesla/models'
+import { DASH, formatAge, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration, formatPsi, formatEfficiency } from '@/lib/format'
 import { TIRE_HIGH_PSI, TIRE_LOW_PSI } from '@/lib/tesla/alerts'
 import { cn } from '@/lib/utils'
 
@@ -9,7 +20,7 @@ import { cn } from '@/lib/utils'
  *
  * **Read-only.** Nothing here sends anything to the vehicle. The spec this screen was
  * written against bans controls outright, and it happens to be the right call for a
-import { DASH, formatAge, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration, formatPsi, formatEfficiency } from '@/lib/format'
+ * display mounted in a car — but the more durable reason is that every element on this
  * surface is a *claim about the car*, and a claim should not also be a button.
  *
  * **No invented numbers.** Several figures in the design brief (remaining kWh, pack
@@ -514,8 +525,8 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
     <Card icon={Timer} title="Energy" aside={series.length > 1 ? <span>{series.length} recent trips</span> : undefined}>
       <Figure
         size="lg"
-        value={last === null ? DASH : (last / 10).toFixed(1)}
-        unit="kWh/100 km"
+        value={last === null ? DASH : (Math.round(last)).toString()}
+        unit="Wh/km"
         label={newest && last !== null ? `Last completed trip · ${formatDateTimeShort(newest.endedAt)}` : 'No completed trip measured yet'}
       />
       <div className="mt-2">
@@ -525,8 +536,8 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
         <p className="text-[11.5px] leading-4 text-ink-tertiary">Consumption is measured per trip, from the energy the pack lost over the distance driven.</p>
       ) : (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-ink-tertiary">
-        value={last === null ? DASH : Math.round(last).toString()}
-        unit="Wh/km"
+          <span>{average === null ? 'Average unavailable' : `${formatEfficiency(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
+          {newest.distanceKm != null && <span>{formatDistanceShort(newest.distanceKm)} on the last one</span>}
         </div>
       )}
     </Card>
@@ -536,7 +547,7 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
 /* ── Tyres ───────────────────────────────────────────────────────────────── */
 
 export function TyreCard({ status }: { status: VehicleStatus }) {
-          <span>{average === null ? 'Average unavailable' : `${formatEfficiency(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
+  const pressures = status.state.tirePressurePsi
   const wheels: Array<{ key: keyof NonNullable<typeof pressures>; label: string }> = [
     { key: 'frontLeft', label: 'FL' },
     { key: 'frontRight', label: 'FR' },
@@ -555,7 +566,7 @@ export function TyreCard({ status }: { status: VehicleStatus }) {
             <div key={wheel.key} className={cn('rounded-lg border px-3 py-2.5', off ? 'border-warn-line bg-warn-soft' : 'border-line bg-surface-muted/60')}>
               <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-tertiary">{wheel.label}</p>
               <p className={cn('mt-0.5 font-mono text-[17px] font-semibold leading-6 tabular-nums', off ? 'text-warn' : 'text-ink')}>
-                {psi === null ? DASH : formatBar(psi)}
+                {psi === null ? DASH : formatPsi(psi)}
               </p>
             </div>
           )
@@ -564,5 +575,10 @@ export function TyreCard({ status }: { status: VehicleStatus }) {
       <p className="mt-2.5 text-[11.5px] leading-4 text-ink-tertiary">
         {stale
           ? 'The vehicle reports tyre pressure only after the sensors have woken, so a car that has been asleep for a while shows nothing here.'
-          : `Highlighted outside ${formatBar(TIRE_LOW_PSI)}–${formatBar(TIRE_HIGH_PSI)}, the same band the alerts use. Cold inflation for this car is about ${formatBar                {psi === null ? DASH : formatPsi(psi)}
           : `Highlighted outside ${formatPsi(TIRE_LOW_PSI)}–${formatPsi(TIRE_HIGH_PSI)}, the same band the alerts use. Cold inflation for this car is about ${formatPsi(42)}.`}
+      </p>
+    </Card>
+  )
+}
+
+export { PRESENCE_WORD }
