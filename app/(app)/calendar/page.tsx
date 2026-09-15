@@ -1,10 +1,9 @@
  'use client'
 
     import { useState } from 'react'
-import Link from 'next/link'
-  import { ArrowRight, CalendarDays, Route } from 'lucide-react'
+import { ArrowRight, Calendar } from '@untitledui/icons'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/base/buttons/button'
 import { Card } from '@/components/ui/card'
 import { useDayTrips } from '@/lib/hooks/use-day-trips'
 import { localDateKey, summarizeTrips } from '@/lib/utils/daily'
@@ -28,15 +27,14 @@ export default function CalendarPage() {
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">
-            <CalendarDays className="size-4" aria-hidden /> Daily activity
+            <Calendar className="size-4" aria-hidden /> Daily activity
           </div>
           <h1 className="mt-1 text-[26px] font-semibold tracking-[-0.03em] text-ink sm:text-[32px]">{selectedDate}</h1>
           <p className="mt-1 text-[13px] text-ink-secondary">Verified drives for this day.</p>
         </div>
           <div className="flex flex-wrap gap-2">
           <div className="relative">
-            <Button type="button" variant="outline" size="icon-sm" aria-label="Open calendar picker" onClick={() => setCalendarOpen((open) => !open)}>
-              <CalendarDays aria-hidden />
+            <Button type="button" color="secondary" size="sm" aria-label="Open calendar picker" iconLeading={Calendar} onPress={() => setCalendarOpen((open) => !open)}>
             </Button>
             {calendarOpen ? (
               <Card className="absolute right-0 top-full z-20 mt-2 w-[min(22rem,calc(100vw-2rem))] p-4 shadow-lg">
@@ -44,8 +42,8 @@ export default function CalendarPage() {
               </Card>
             ) : null}
           </div>
-          <Button asChild variant="outline"><Link href={`/day/${selectedDate}`}>Open day report <ArrowRight /></Link></Button>
-          <Button asChild><Link href="/trips">All trips <ArrowRight /></Link></Button>
+          <Button href={`/day/${selectedDate}`} color="secondary" size="sm" iconTrailing={ArrowRight}>Open day report</Button>
+          <Button href="/trips" color="primary" size="sm" iconTrailing={ArrowRight}>All trips</Button>
         </div>
       </section>
 
@@ -93,10 +91,10 @@ export default function CalendarPage() {
         ) : (
           <div className="mt-2 divide-y divide-line">
             {trips.map((trip) => (
-                <Link key={trip.id} href={`/trips/${trip.id}`} className="flex flex-wrap items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0 hover:bg-surface-muted/50">
-                <span className="flex min-w-0 items-center gap-3"><Route className="size-4 text-accent" aria-hidden /><span className="truncate text-sm font-medium text-ink">{new Date(trip.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span className="text-sm text-ink-secondary">{trip.distanceKm == null ? 'Distance unavailable' : `${trip.distanceKm.toFixed(1)} km`}</span></span>
+                <a key={trip.id} href={`/trips/${trip.id}`} className="flex flex-wrap items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0 hover:bg-surface-muted/50">
+                <span className="flex min-w-0 items-center gap-3"><span className="size-2 rounded-full bg-accent" aria-hidden /><span className="truncate text-sm font-medium text-ink">{new Date(trip.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span><span className="text-sm text-ink-secondary">{trip.distanceKm == null ? 'Distance unavailable' : `${trip.distanceKm.toFixed(1)} km`}</span></span>
                 <span className="text-sm text-ink-secondary">{trip.energyUsedKwh == null ? 'Energy unavailable' : `${trip.energyUsedKwh.toFixed(2)} kWh`}</span>
-              </Link>
+                </a>
             ))}
           </div>
         )}
