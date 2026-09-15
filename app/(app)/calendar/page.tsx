@@ -27,7 +27,10 @@ export default function CalendarPage() {
           <h1 className="mt-2 text-[30px] font-semibold tracking-[-0.03em] text-ink sm:text-[36px]">{selectedDate}</h1>
           <p className="mt-1 text-sm text-ink-secondary">Verified drives available for this local calendar day.</p>
         </div>
-        <Button asChild variant="outline"><Link href="/trips">All trips <ArrowRight /></Link></Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline"><Link href={`/day/${selectedDate}`}>Open day report <ArrowRight /></Link></Button>
+            <Button asChild variant="outline"><Link href="/trips">All trips <ArrowRight /></Link></Button>
+          </div>
       </section>
 
       <div className="grid grid-cols-4 gap-2 overflow-x-auto pb-1 sm:grid-cols-7">
