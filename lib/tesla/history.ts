@@ -524,17 +524,52 @@ export type PersistReport = { battery: number; trips: number; charging: number; 
 
 async function tryUpsert(table: string, rows: Array<Record<string, unknown>>, dedupeKey: string): Promise<boolean> {
   const supabase = getSupabaseAdmin()
-  const { error } = await supabase.from(table).upsert(rows, { onConflict: 'vehicle_id,dedupe_key', ignoreDuplicates: false })
+  const vehicleId = typeof rows[0]?.vehicle_id === 'string' ? rows[0].vehicle_id : null
+  const keys = rows
+    .map((row) => row.dedupe_key)
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+
+  if (!vehicleId || keys.length !== rows.length) {
+    const { error } = await supabase.from(table).insert(rows)
+    if (!error) return true
+    console.error(`[tesla] persist ${table} failed (${dedupeKey})`, error.message)
+    return false
+  }
+
+  const existingKeys = new Set<string>()
+  for (let offset = 0; offset < keys.length; offset += 100) {
+    const chunk = keys.slice(offset, offset + 100)
+    const { data, error } = await supabase
+      .from(table)
+      .select('dedupe_key')
+      .eq('vehicle_id', vehicleId)
+      .in('dedupe_key', chunk)
+    if (error) {
+      console.error(`[tesla] read existing ${table} dedupe keys failed (${dedupeKey})`, error.message)
+      return false
+    }
+    for (const row of data ?? []) {
+      if (typeof row.dedupe_key === 'string') existingKeys.add(row.dedupe_key)
+    }
+  }
+
+  for (const row of rows.filter((candidate) => existingKeys.has(String(candidate.dedupe_key)))) {
+    const { error } = await supabase
+      .from(table)
+      .update(row)
+      .eq('vehicle_id', vehicleId)
+      .eq('dedupe_key', String(row.dedupe_key))
+    if (error) {
+      console.error(`[tesla] update existing ${table} failed (${dedupeKey})`, error.message)
+      return false
+    }
+  }
+
+  const pending = rows.filter((candidate) => !existingKeys.has(String(candidate.dedupe_key)))
+  if (!pending.length) return true
+  const { error } = await supabase.from(table).insert(pending)
   if (!error) return true
-  if (/duplicate key|unique/i.test(error.message ?? '')) {
-    console.error(`[tesla] persist ${table} conflict (${dedupeKey})`, error.message)
-    return false
-  }
-  if (/Could not find|does not exist|relation|column/i.test(error.message ?? '')) {
-    console.error(`[tesla] persist ${table} schema error (${dedupeKey})`, error.message)
-    return false
-  }
-  console.error(`[tesla] persist ${table} failed (${dedupeKey})`, error.message)
+  console.error(`[tesla] insert new ${table} failed (${dedupeKey})`, error.message)
   return false
 }
 
