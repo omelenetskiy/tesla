@@ -273,6 +273,27 @@ async function tableExists(name: string): Promise<boolean> {
   return !/relation|does not exist|42P01|Could not find/i.test(error.message ?? '')
 }
 
+async function readAllSnapshots(vehicleId: string): Promise<{ data: SnapshotRow[]; error: { message?: string } | null }> {
+  const supabase = getSupabaseAdmin()
+  const pageSize = 1000
+  const rows: SnapshotRow[] = []
+
+  for (let offset = 0; offset < 50_000; offset += pageSize) {
+    const { data, error } = await supabase
+      .from('vehicle_states')
+      .select('state, collected_at')
+      .eq('vehicle_id', vehicleId)
+      .order('collected_at', { ascending: true })
+      .range(offset, offset + pageSize - 1)
+    if (error) return { data: rows, error }
+    const page = (data ?? []) as SnapshotRow[]
+    rows.push(...page)
+    if (page.length < pageSize) break
+  }
+
+  return { data: rows, error: null }
+}
+
 export type HistoryBundle = {
   battery: BatterySnapshot[]
   trips: Trip[]
@@ -286,12 +307,7 @@ export async function readHistory(vehicleId: string, range: HistoryRange = '30d'
   const supabase = getSupabaseAdmin()
   const since = rangeToSince(range)
 
-  const { data: snapshotRows, error: snapshotError } = await supabase
-    .from('vehicle_states')
-    .select('state, collected_at')
-    .eq('vehicle_id', vehicleId)
-    .order('collected_at', { ascending: true })
-    .limit(5000)
+  const { data: snapshotRows, error: snapshotError } = await readAllSnapshots(vehicleId)
   if (snapshotError) {
     return { battery: [], trips: [], charging: [], origin: 'empty', historyTablesMissing: true, snapshotCount: 0 }
   }
