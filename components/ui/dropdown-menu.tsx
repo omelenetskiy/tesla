@@ -1,81 +1,48 @@
 'use client'
 
 import * as React from 'react'
-import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu'
-import { Check } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Dropdown } from '@/components/base/dropdown/dropdown'
+import { Button as AriaButton, MenuItem as AriaMenuItem, MenuTrigger as AriaMenuTrigger, Popover as AriaPopover, Separator as AriaSeparator } from 'react-aria-components'
+import { cx } from '@/utils/cx'
 
-/** Radix dropdown, skinned to the product tokens. */
-export const DropdownMenu = DropdownMenuPrimitive.Root
-export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
-export const DropdownMenuGroup = DropdownMenuPrimitive.Group
+export const DropdownMenu = AriaMenuTrigger
+export const DropdownMenuTrigger = AriaButton
+export const DropdownMenuGroup = React.Fragment
 
-export const DropdownMenuContent = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentProps<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 8, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn(
-        'z-50 min-w-[13rem] overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-lg',
-        className,
-      )}
+export function DropdownMenuContent({ className, children, align: _align, ...props }: React.ComponentProps<typeof AriaPopover> & { align?: string }) {
+  return (
+    <AriaPopover
+      placement="bottom right"
       {...props}
-    />
-  </DropdownMenuPrimitive.Portal>
-))
-DropdownMenuContent.displayName = 'DropdownMenuContent'
-
-export const DropdownMenuItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Item>,
-  React.ComponentProps<typeof DropdownMenuPrimitive.Item> & { tone?: 'default' | 'danger' }
->(({ className, tone = 'default', ...props }, ref) => (
-  <DropdownMenuPrimitive.Item
-    ref={ref}
-    className={cn(
-      'flex min-h-11 cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] outline-none transition-colors',
-      tone === 'danger' ? 'text-danger data-[highlighted]:bg-danger-soft' : 'text-ink data-[highlighted]:bg-surface-muted',
-      className,
-    )}
-    {...props}
-  />
-))
-DropdownMenuItem.displayName = 'DropdownMenuItem'
-
-export const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
-
-export const DropdownMenuRadioItem = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
-  React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>
->(({ className, children, ...props }, ref) => (
-  <DropdownMenuPrimitive.RadioItem
-    ref={ref}
-    className={cn(
-      'flex min-h-11 cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] text-ink outline-none transition-colors data-[highlighted]:bg-surface-muted',
-      className,
-    )}
-    {...props}
-  >
-    {children}
-    <span className="ml-auto flex size-4 items-center justify-center">
-      <DropdownMenuPrimitive.ItemIndicator>
-        <Check className="size-4 text-accent" />
-      </DropdownMenuPrimitive.ItemIndicator>
-    </span>
-  </DropdownMenuPrimitive.RadioItem>
-))
-DropdownMenuRadioItem.displayName = 'DropdownMenuRadioItem'
-
-export const DropdownMenuLabel = React.forwardRef<
-  React.ElementRef<typeof DropdownMenuPrimitive.Label>,
-  React.ComponentProps<typeof DropdownMenuPrimitive.Label>
->(({ className, ...props }, ref) => (
-  <DropdownMenuPrimitive.Label ref={ref} className={cn('px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary', className)} {...props} />
-))
-DropdownMenuLabel.displayName = 'DropdownMenuLabel'
-
-export function DropdownMenuSeparator({ className }: { className?: string }) {
-  return <DropdownMenuPrimitive.Separator className={cn('my-1 h-px bg-line', className)} />
+      className={cx('z-50 min-w-[13rem] overflow-hidden rounded-xl border border-line bg-surface p-1 shadow-lg', className as string)}
+    >
+      <Dropdown.Menu>{children}</Dropdown.Menu>
+    </AriaPopover>
+  )
 }
+
+export function DropdownMenuItem({ className, tone = 'default', onSelect, disabled, ...props }: React.ComponentProps<typeof AriaMenuItem> & { tone?: 'default' | 'danger'; onSelect?: () => void; disabled?: boolean }) {
+  return (
+    <AriaMenuItem
+      {...props}
+      onAction={onSelect}
+      isDisabled={disabled}
+      className={cx(
+        'flex min-h-11 cursor-pointer select-none items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] outline-none transition-colors',
+        tone === 'danger' ? 'text-danger' : 'text-ink',
+        className as string,
+      )}
+    />
+  )
+}
+
+export const DropdownMenuSeparator = (props: React.ComponentProps<typeof AriaSeparator>) => (
+  <AriaSeparator {...props} className={cx('my-1 h-px bg-line', props.className as string)} />
+)
+
+export const DropdownMenuLabel = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div className={cx('px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-tertiary', className)} {...props} />
+)
+
+export const DropdownMenuRadioGroup = Dropdown.Menu
+export const DropdownMenuRadioItem = DropdownMenuItem
