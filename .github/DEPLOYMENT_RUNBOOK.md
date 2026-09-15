@@ -6,7 +6,7 @@ Complete step-by-step procedures for deploying and maintaining the DriveScope sy
 - [ ] SSH key exists: `~/.ssh/ubuntu-ssh-key-2026-09-14.key`
 - [ ] SSH key permissions: 600 (run `chmod 600 ~/.ssh/ubuntu-ssh-key-2026-09-14.key`)
 - [ ] Domain DNS resolves: `telemetry.omelenetskiy.xyz` → `130.61.30.119`
-- [ ] Netlify frontend deployed: `app.omelenetskiy.xyz`
+- [ ] Frontend app deployed on the VM (PM2 process `TeslaApp`): `app.omelenetskiy.xyz`
 - [ ] Tesla Partner account configured
 - [ ] Tesla Fleet credentials obtained
 
@@ -14,7 +14,7 @@ Complete step-by-step procedures for deploying and maintaining the DriveScope sy
 
 ### Phase 1: Initial Setup (Completed 2026-09-14)
 
-This phase separates the frontend (Netlify) from backend (VM telemetry).
+This phase set up the frontend app and the telemetry receiver, both on the same Oracle VM.
 
 #### 1.1 Verify VM Connectivity
 ```bash

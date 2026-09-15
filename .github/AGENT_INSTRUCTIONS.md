@@ -5,10 +5,10 @@ This document guides AI agents (Copilot, Claude, etc.) through the DriveScope te
 ## Quick Reference
 
 ### Architecture
-- **Frontend**: Next.js app on Netlify → `app.omelenetskiy.xyz`
+- **Frontend**: Next.js app on the Oracle VM → `app.omelenetskiy.xyz` (served via PM2 process `TeslaApp` behind nginx; deployed with `scripts/deploy.sh`, not Netlify)
 - **Backend**: Tesla Fleet Telemetry receiver on Oracle VM → `telemetry.omelenetskiy.xyz`
 - **VM IP**: 130.61.30.119 (public)
-- **VM Role**: Telemetry-only (never proxy the frontend app)
+- **VM Role**: Hosts both the frontend app and the telemetry receiver
 
 ### SSH Access
 ```bash
@@ -77,7 +77,7 @@ ssh -i ~/.ssh/ubuntu-ssh-key-2026-09-14.key ubuntu@130.61.30.119 \
 ### Initial Deployment (Already Completed)
 This was completed on 2026-09-14. Reference: `.logs/2026-09-14-telemetry-setup.md`
 
-1. ✅ Separated frontend (Netlify) from backend (VM)
+1. ✅ Frontend and telemetry both running on the Oracle VM (PM2 + Docker)
 2. ✅ Issued TLS certificate via Let's Encrypt
 3. ✅ Fixed docker-compose configuration
 4. ✅ Started Fleet Telemetry receiver
@@ -175,7 +175,7 @@ deploy/fleet-telemetry/
 
 ## Important Notes for Agents
 
-1. **Never change the frontend/backend split**: The frontend stays on Netlify; the VM is telemetry-only.
+1. **The frontend runs on this VM, not Netlify**: `app.omelenetskiy.xyz` is served by the `TeslaApp` PM2 process on this VM. Deploy it with `bash scripts/deploy.sh` (rsync + `npm ci && npm run build` + PM2 restart on the VM).
 2. **Always verify before deploying**: Run verification checks after any change.
 3. **Update logs**: After completing a task, add an entry to `.logs/` documenting what was done.
 4. **Check DNS before issuing certificates**: Verify DNS resolves to the correct IP before ACME challenges.
