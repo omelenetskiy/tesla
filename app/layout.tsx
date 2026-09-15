@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist_Mono, Roboto } from 'next/font/google'
+import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
 
 /**
@@ -30,16 +31,18 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${roboto.className} ${geistMono.variable}`}>
-        <link rel="preconnect" href="https://tiles.openfreemap.org" crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href="https://tiles.openfreemap.org" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
+        <ThemeProvider>
+          <link rel="preconnect" href="https://tiles.openfreemap.org" crossOrigin="anonymous" />
+          <link rel="dns-prefetch" href="https://tiles.openfreemap.org" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `
 (function(){try{var p=localStorage.getItem('theme')||'system';var dark=p==='dark'||(p==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.setAttribute('data-theme',dark?'dark':'light')}catch(e){document.documentElement.setAttribute('data-theme','light')}})();`,
-          }}
-        />
-        {children}
+            }}
+          />
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   )

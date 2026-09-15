@@ -292,7 +292,7 @@ export function VehicleMap(props: VehicleMapProps) {
     const map = mapRef.current
     if (!map || !styleReady) return
     const existing = map.getSource('route') as maplibregl.GeoJSONSource | undefined
-    const data: GeoJSON.Feature<GeoJSON.LineString> | null = hasRoute
+    const data = hasRoute
       ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: routeCoords } }
       : null
 

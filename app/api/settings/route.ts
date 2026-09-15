@@ -96,12 +96,18 @@ export async function GET(request: Request) {
   }
 }
 
-/** PATCH /api/settings - display units only. */
+/** PATCH /api/settings - user preferences. */
 export async function PATCH(request: Request) {
   const user = await getAuthenticatedUser()
   if (!user) return NextResponse.json({ message: 'Sign-in required' }, { status: 401 })
 
-  let body: { distanceUnit?: string; temperatureUnit?: string }
+  let body: {
+    distanceUnit?: string
+    temperatureUnit?: string
+    timeZone?: string
+    locale?: string
+    locationHistoryEnabled?: boolean
+  }
   try {
     body = await request.json()
   } catch {
@@ -110,17 +116,33 @@ export async function PATCH(request: Request) {
 
   const supabase = getSupabaseAdmin()
 
-  if (body.distanceUnit || body.temperatureUnit) {
-    if (body.distanceUnit && !['km', 'mi'].includes(body.distanceUnit)) return NextResponse.json({ message: 'Invalid distance unit' }, { status: 400 })
-    if (body.temperatureUnit && !['C', 'F'].includes(body.temperatureUnit)) return NextResponse.json({ message: 'Invalid temperature unit' }, { status: 400 })
-    const { error } = await supabase.from('user_settings').upsert({
-      user_id: user.id,
-      ...(body.distanceUnit ? { distance_unit: body.distanceUnit } : {}),
-      ...(body.temperatureUnit ? { temperature_unit: body.temperatureUnit } : {}),
-      updated_at: new Date().toISOString(),
-    })
-    if (error) return NextResponse.json({ message: error.message }, { status: 500 })
+  if (body.distanceUnit && !['km', 'mi'].includes(body.distanceUnit)) {
+    return NextResponse.json({ message: 'Invalid distance unit' }, { status: 400 })
   }
+  if (body.temperatureUnit && !['C', 'F'].includes(body.temperatureUnit)) {
+    return NextResponse.json({ message: 'Invalid temperature unit' }, { status: 400 })
+  }
+  if (body.timeZone && body.timeZone.length > 64) {
+    return NextResponse.json({ message: 'Invalid time zone' }, { status: 400 })
+  }
+  if (body.locale && body.locale.length > 32) {
+    return NextResponse.json({ message: 'Invalid locale' }, { status: 400 })
+  }
+
+  const patch = {
+    user_id: user.id,
+    ...(body.distanceUnit ? { distance_unit: body.distanceUnit } : {}),
+    ...(body.temperatureUnit ? { temperature_unit: body.temperatureUnit } : {}),
+    ...(typeof body.timeZone === 'string' ? { time_zone: body.timeZone } : {}),
+    ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
+    ...(typeof body.locationHistoryEnabled === 'boolean'
+      ? { location_history_enabled: body.locationHistoryEnabled }
+      : {}),
+    updated_at: new Date().toISOString(),
+  }
+
+  const { error } = await supabase.from('user_settings').upsert(patch)
+  if (error) return NextResponse.json({ message: error.message }, { status: 500 })
 
   return NextResponse.json({ ok: true })
 }

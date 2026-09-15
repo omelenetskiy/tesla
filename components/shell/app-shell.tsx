@@ -5,6 +5,7 @@ import Link from 'next/link'
 import {usePathname, useRouter} from 'next/navigation'
 import {
     Battery,
+    CalendarDays,
     LayoutDashboard,
     LogOut,
     Menu,
@@ -48,9 +49,10 @@ export function useFeed(): VehicleFeed {
 
 const NAV = [
     {href: '/', label: 'Dashboard', icon: LayoutDashboard},
-    {href: '/trips', label: 'Trips', icon: Route},
     {href: '/battery', label: 'Battery', icon: Battery},
     {href: '/charging', label: 'Charging', icon: Zap},
+    {href: '/trips', label: 'Trips', icon: Route},
+    {href: '/calendar', label: 'Calendar', icon: CalendarDays},
     {href: '/alerts', label: 'Alerts', icon: Siren},
 ]
 
@@ -261,7 +263,7 @@ function UserMenu() {
             await fetch('/api/fleet/credentials', { method: 'DELETE' }).catch(() => {
                 // Silent fail — app can sign out even if credential delete fails
               })
-            
+
             // Then sign out of app
             await createSupabaseBrowserClient().auth.signOut()
             router.replace('/login')

@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { BatteryChart, EnergyChart, RangeChart } from '@/components/charts/telemetry-charts'
+import { BatteryChart, RangeChart } from '@/components/charts/telemetry-charts'
 import { Gauge } from '@/components/ui/gauge'
 import { Segmented } from '@/components/ui/segmented'
 import { PanelSkeleton } from '@/components/dashboard/vehicle-panels'
@@ -9,13 +9,6 @@ import { useFeed } from '@/components/shell/app-shell'
 import type { BatterySnapshot } from '@/lib/tesla/models'
 import { formatEfficiency, formatKm, formatPercent, formatTempCelsius } from '@/lib/format'
 
-/**
- * Battery = ENERGY STATE (§9): current figure, then history, then health.
- *
- * The health panel is conditional by design. Degradation needs a long history of
- * full-charge references; publishing a number from a few days of snapshots would be
- * a fabrication, so the panel states what is missing instead.
- */
 const RANGES = [
   { value: '24h', label: '24h' },
   { value: '7d', label: '7d' },
@@ -61,8 +54,19 @@ export default function BatteryPage() {
   const charging = snapshots.filter((snapshot) => snapshot.chargingConnection === 'charging').length
 
   return (
-    <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-      <section className="rounded-xl border border-line bg-surface p-4" aria-label="Current battery state">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold">Battery</h1>
+        <Segmented
+          ariaLabel="History range"
+          size="sm"
+          options={RANGES.map((item) => ({ value: item.value, label: item.label }))}
+          value={range}
+          onChange={(value) => setRange(value as Range)}
+        />
+      </div>
+
+      <section className="rounded-xl border border-line bg-surface p-4">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-5">
           <Gauge value={soc} size={158} caption="battery" />
           <dl className="grid min-w-0 flex-1 grid-cols-2 gap-x-7 gap-y-4 sm:grid-cols-3">
@@ -76,54 +80,30 @@ export default function BatteryPage() {
         </div>
       </section>
 
-      <section className="min-w-0 rounded-xl border border-line bg-surface p-4" aria-label="Battery history">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="mr-auto text-[14px] font-semibold text-ink">Charge history</h2>
-          <Segmented ariaLabel="History range" size="sm" options={RANGES.map((item) => ({ value: item.value, label: item.label }))} value={range} onChange={(value) => setRange(value as Range)} />
-        </div>
-        {loading && <PanelSkeleton rows={4} className="h-[210px]" />}
-        {!loading && <BatteryChart points={series} height={210} />}
-        {!loading && origin === 'reconstructed_from_snapshots' && snapshots.length > 0 && (
-          <p className="mt-2 text-[11.5px] leading-4 text-ink-tertiary">
-            Built from {snapshots.length} telemetry snapshots. Segments between snapshots are drawn as a line, not as measurements.
-          </p>
-        )}
-      </section>
-
-      <section className="min-w-0 rounded-xl border border-line bg-surface p-4" aria-label="Range history">
-        <h2 className="mb-3 text-[14px] font-semibold text-ink">Range</h2>
-        <RangeChart points={rangeSeries} height={180} />
-      </section>
-
-      <div className="min-w-0 space-y-3">
-        <section className="rounded-xl border border-line bg-surface p-4" aria-label="Period figures">
-          <h2 className="mb-3 text-[14px] font-semibold text-ink">Period figures</h2>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5">
-            <Figure label="Lowest" value={formatPercent(values.length ? Math.min(...values) : null)} />
-            <Figure label="Highest" value={formatPercent(values.length ? Math.max(...values) : null)} />
-            <Figure label="Snapshots charging" value={String(charging)} />
-            <Figure label="Efficiency" value={formatEfficiency(efficiencyFrom(snapshots))} />
-          </dl>
-          <p className="mt-2.5 text-[11.5px] leading-4 text-ink-tertiary">
-            Efficiency is range lost per percent of charge across driving snapshots — the only consumption figure the stored data supports directly.
-          </p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section className="min-w-0 rounded-xl border border-line bg-surface p-4">
+          <h2 className="mb-3 text-[14px] font-semibold text-ink">Charge History</h2>
+          {loading && <PanelSkeleton rows={4} className="h-[210px]" />}
+          {!loading && <BatteryChart points={series} height={210} />}
         </section>
 
-        <section className="rounded-xl border border-line bg-surface p-4" aria-label="Battery health">
-          <h2 className="text-[14px] font-semibold text-ink">Battery health</h2>
-          {snapshots.length < 30 ? (
-            <p className="mt-1.5 text-[12.5px] leading-5 text-ink-secondary">
-              Not shown. Degradation needs at least 30 full-charge reference points over a long period; there are {snapshots.length}. Any figure here would be an
-              extrapolation rather than a measurement.
-            </p>
-          ) : (
-            <p className="mt-1.5 text-[12.5px] leading-5 text-ink-secondary">
-              {snapshots.length} snapshots collected. Rated-capacity degradation still requires the Fleet API to report full-charge capacity; until it does, this panel stays
-              empty rather than estimating.
-            </p>
-          )}
+        <section className="min-w-0 rounded-xl border border-line bg-surface p-4">
+          <h2 className="mb-3 text-[14px] font-semibold text-ink">Range Trend</h2>
+          {loading && <PanelSkeleton rows={4} className="h-[210px]" />}
+          {!loading && <RangeChart points={rangeSeries} height={210} />}
         </section>
       </div>
+
+      <section className="rounded-xl border border-line bg-surface p-4">
+        <h2 className="mb-4 text-[14px] font-semibold text-ink">Period Summary</h2>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3.5 sm:grid-cols-3 lg:grid-cols-4">
+          <Figure label="Lowest SOC" value={formatPercent(values.length ? Math.min(...values) : null)} />
+          <Figure label="Highest SOC" value={formatPercent(values.length ? Math.max(...values) : null)} />
+          <Figure label="Snapshots" value={String(snapshots.length)} />
+          <Figure label="Charging Events" value={String(charging)} />
+          <Figure label="Avg Efficiency" value={formatEfficiency(efficiencyFrom(snapshots))} />
+        </dl>
+      </section>
     </div>
   )
 }
@@ -146,7 +126,6 @@ function connectorLabel(connection: string): string {
   return 'Unknown'
 }
 
-/** Range lost per percent of charge, ignoring charging and odometer-less spans. */
 function efficiencyFrom(snapshots: BatterySnapshot[]): number | null {
   const samples: number[] = []
   for (let index = 1; index < snapshots.length; index += 1) {
@@ -160,3 +139,4 @@ function efficiencyFrom(snapshots: BatterySnapshot[]): number | null {
   if (!samples.length) return null
   return Math.round(samples.reduce((sum, value) => sum + value, 0) / samples.length)
 }
+

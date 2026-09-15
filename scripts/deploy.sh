@@ -11,6 +11,7 @@ VM_HOST="${VM_HOST:-app.omelenetskiy.xyz}"
 VM_PATH="${VM_PATH:-/home/ubuntu/TeslaApp}"
 TELEMETRY_HOST="${TELEMETRY_HOST:-telemetry.omelenetskiy.xyz}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/id_rsa}"
+SSH_CMD="ssh -i $SSH_KEY"
 
 # Colors for output
 RED='\033[0;31m'
@@ -62,7 +63,7 @@ check_requirements() {
 test_connection() {
     log_info "Testing SSH connection to $VM_USER@$VM_HOST..."
 
-    if ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$VM_USER@$VM_HOST" "echo 'Connection OK'" &> /dev/null; then
+    if $SSH_CMD -o ConnectTimeout=5 "$VM_USER@$VM_HOST" "echo 'Connection OK'" &> /dev/null; then
         log_success "SSH connection established"
     else
         log_error "Cannot connect to VM. Check SSH_KEY, VM_HOST, and VM_USER."
@@ -83,7 +84,9 @@ sync_to_vm() {
         --exclude='.git' \
         --exclude='dist' \
         --exclude='.DS_Store' \
-        -e "ssh -i $SSH_KEY" \
+        --exclude='.netlify' \
+        --exclude='deploy/fleet-telemetry/certs' \
+        -e "$SSH_CMD" \
         . "$VM_USER@$VM_HOST:$VM_PATH/"
 
     log_success "Code synced to VM"
@@ -93,21 +96,35 @@ sync_to_vm() {
 build_on_vm() {
     log_info "Building on VM..."
 
-    ssh -i "$SSH_KEY" "$VM_USER@$VM_HOST" bash -c "
+    $SSH_CMD "$VM_USER@$VM_HOST" "
         set -e
         cd $VM_PATH
 
         # Install/update dependencies
         npm ci --prefer-offline --no-audit
 
+        # Ensure PM2 exists for process management
+        if ! command -v pm2 >/dev/null 2>&1; then
+            sudo npm install -g pm2
+        fi
+
         # Build Next.js app
         npm run build
 
-        # Stop existing PM2 process if running
-        pm2 stop TeslaApp 2>/dev/null || true
+        # Restart existing PM2 process or create it if missing
+        if pm2 describe TeslaApp >/dev/null 2>&1; then
+            pm2 restart TeslaApp --update-env
+        else
+            pm2 start 'npm start' --name TeslaApp --cwd $VM_PATH
+        fi
 
-        # Start app with PM2
-        pm2 start 'npm start' --name TeslaApp --cwd $VM_PATH
+        # Restart telemetry ingestion or create it if missing
+        if pm2 describe TeslaTelemetryIngest >/dev/null 2>&1; then
+            pm2 restart TeslaTelemetryIngest --update-env
+        else
+            pm2 start 'bash deploy/fleet-telemetry/run-ingest-loop.sh' --name TeslaTelemetryIngest --cwd $VM_PATH
+        fi
+
         pm2 save
 
         echo 'Build and restart complete'
@@ -120,9 +137,10 @@ build_on_vm() {
 verify_telemetry() {
     log_info "Verifying telemetry status..."
 
-    ssh -i "$SSH_KEY" "$VM_USER@$VM_HOST" bash -c "
+    $SSH_CMD "$VM_USER@$VM_HOST" "
         cd $VM_PATH
         docker ps | grep fleet-telemetry || echo 'Warning: fleet-telemetry container not found'
+        pm2 describe TeslaTelemetryIngest >/dev/null 2>&1 || echo 'Warning: TeslaTelemetryIngest PM2 process not found'
     "
 }
 
@@ -137,7 +155,8 @@ show_summary() {
     echo "Next steps:"
     echo "  1. Check VM status: ssh -i $SSH_KEY $VM_USER@$VM_HOST pm2 status"
     echo "  2. View logs: ssh -i $SSH_KEY $VM_USER@$VM_HOST pm2 logs TeslaApp"
-    echo "  3. View telemetry: ssh -i $SSH_KEY $VM_USER@$VM_HOST docker compose -f deploy/fleet-telemetry/docker-compose.sni-router.yml logs -f"
+    echo "  3. View ingest logs: ssh -i $SSH_KEY $VM_USER@$VM_HOST pm2 logs TeslaTelemetryIngest"
+    echo "  4. View telemetry container logs: ssh -i $SSH_KEY $VM_USER@$VM_HOST docker compose -f deploy/fleet-telemetry/docker-compose.sni-router.yml logs -f"
 }
 
 # Main deployment flow
@@ -210,4 +229,3 @@ main() {
 }
 
 main "$@"
-
