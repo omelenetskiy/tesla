@@ -39,6 +39,7 @@ interface TripDetail {
     lng: number
     name: string
   } | null
+  route: Array<[number, number]>
   efficiency: number | null
   energyUsedKwh: number | null
   startSoc: number | null
@@ -120,7 +121,9 @@ export default function TripDetailPageV2({ params }: PageProps) {
           endLat={trip.endLocation!.lat}
           endLng={trip.endLocation!.lng}
           distance={trip.distance ?? 0}
-          samples={trip.samples}
+          route={trip.route}
+          startName={trip.startLocation!.name}
+          endName={trip.endLocation!.name}
         />
       ) : (
         <Alert
@@ -134,7 +137,7 @@ export default function TripDetailPageV2({ params }: PageProps) {
         metrics={[
           { label: 'Distance', value: trip.distance == null ? unavailable : trip.distance.toFixed(1), unit: trip.distance == null ? undefined : 'km' },
           { label: 'Efficiency', value: trip.efficiency == null ? unavailable : trip.efficiency.toFixed(0), unit: trip.efficiency == null ? undefined : 'Wh/km' },
-          { label: 'Energy Used', value: trip.energyUsedKwh == null ? unavailable : trip.energyUsedKwh.toFixed(1), unit: trip.energyUsedKwh == null ? undefined : 'kWh' },
+          { label: 'Energy Used', value: trip.energyUsedKwh == null ? unavailable : trip.energyUsedKwh.toFixed(2), unit: trip.energyUsedKwh == null ? undefined : 'kWh' },
           { label: 'Max Speed', value: trip.maxSpeed == null ? unavailable : trip.maxSpeed.toFixed(0), unit: trip.maxSpeed == null ? undefined : 'km/h' },
           { label: 'Avg Speed', value: trip.avgSpeed == null ? unavailable : trip.avgSpeed.toFixed(0), unit: trip.avgSpeed == null ? undefined : 'km/h' },
           { label: 'Elevation', value: trip.elevation == null ? unavailable : trip.elevation.toFixed(0), unit: trip.elevation == null ? undefined : 'm' },

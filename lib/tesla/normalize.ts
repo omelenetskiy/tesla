@@ -353,6 +353,8 @@ export function normalizeDriveState(raw: Partial<RawDriveState> | undefined): Dr
     speedKmh: speed === null ? null : rounded(Math.max(0, speed), 0),
     // `power` is kW in current firmware; negative during regeneration.
     powerKw: power === null ? null : rounded(power, 1),
+    packVoltageV: null,
+    packCurrentA: null,
     shiftState: normalizeShift(raw?.shift_state),
     heading: num(raw?.heading),
     latitude: num(raw?.latitude),

@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from '@/lib/supabase-server'
 import { readHistory, type HistoryRange } from '@/lib/tesla/history'
 import { resolveVehicle } from '@/lib/tesla/service'
 import { resolveTripLocations } from '@/lib/tesla/trip-locations'
+import { reverseGeocode } from '@/lib/geo/place'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,16 +25,22 @@ export async function GET(request: NextRequest) {
     if (!row) return NextResponse.json({ trips: [], message: 'Vehicle not connected' }, { status: 404 })
 
     const history = await readHistory(row.id, range)
-    const trips = history.trips.map((trip) => {
+    const trips = await Promise.all(history.trips.map(async (trip) => {
       const { startLocation, endLocation } = resolveTripLocations(trip)
+      const [startPlace, endPlace] = await Promise.all([
+        startLocation ? reverseGeocode(startLocation.lat, startLocation.lng) : Promise.resolve(null),
+        endLocation ? reverseGeocode(endLocation.lat, endLocation.lng) : Promise.resolve(null),
+      ])
 
       return {
         id: trip.id,
         startTime: trip.startedAt,
         endTime: trip.endedAt ?? trip.startedAt,
         distance: trip.distanceKm,
-        startLocation,
-        endLocation,
+        startLocation: startLocation ? { ...startLocation, name: startPlace?.label ?? 'Address unavailable' } : null,
+        endLocation: endLocation ? { ...endLocation, name: endPlace?.label ?? 'Address unavailable' } : null,
+        durationMinutes: trip.durationMinutes,
+        energyUsedKwh: trip.energyUsedKwh,
         efficiency: trip.efficiencyWhPerKm,
         startSoc: trip.batteryStartPercent,
         endSoc: trip.batteryEndPercent,
@@ -42,7 +49,7 @@ export async function GET(request: NextRequest) {
         confidence: trip.confidence,
         partial: trip.partial,
       }
-    })
+    }))
 
     return NextResponse.json(
       {

@@ -5,6 +5,7 @@ import { resolveVehicle } from '@/lib/tesla/service'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import type { Trip } from '@/lib/tesla/models'
 import { resolveTripLocations } from '@/lib/tesla/trip-locations'
+import { reverseGeocode } from '@/lib/geo/place'
 
 export const dynamic = 'force-dynamic'
 
@@ -69,25 +70,33 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const trip = history.trips.find((item) => item.id === id) ?? (await readTripById(row.id, id))
     if (!trip) return NextResponse.json({ message: 'Trip not found' }, { status: 404 })
 
-    const { startLocation, endLocation } = resolveTripLocations(trip)
+    const { startLocation, endLocation, routePoints } = resolveTripLocations(trip)
+    const [startPlace, endPlace] = await Promise.all([
+      startLocation ? reverseGeocode(startLocation.lat, startLocation.lng) : Promise.resolve(null),
+      endLocation ? reverseGeocode(endLocation.lat, endLocation.lng) : Promise.resolve(null),
+    ])
 
     return NextResponse.json({
       id: trip.id,
       startTime: trip.startedAt,
       endTime: trip.endedAt ?? trip.startedAt,
       distance: trip.distanceKm,
-      startLocation,
-      endLocation,
+      durationMinutes: trip.durationMinutes,
+      startLocation: startLocation ? { ...startLocation, name: startPlace?.label ?? 'Address unavailable' } : null,
+      endLocation: endLocation ? { ...endLocation, name: endPlace?.label ?? 'Address unavailable' } : null,
+      route: routePoints,
       efficiency: trip.efficiencyWhPerKm,
       energyUsedKwh: trip.energyUsedKwh,
       startSoc: trip.batteryStartPercent,
       endSoc: trip.batteryEndPercent,
       maxSpeed: trip.maxSpeedKmh,
       avgSpeed: trip.averageSpeedKmh,
+      odometerStartKm: trip.odometerStartKm,
+      odometerEndKm: trip.odometerEndKm,
       elevation: null,
       samples: [],
       samplesVerified: false,
-      samplesOrigin: 'unavailable',
+      samplesOrigin: history.origin,
       confidence: trip.confidence,
       partial: trip.partial,
     })

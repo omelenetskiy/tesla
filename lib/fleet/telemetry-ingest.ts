@@ -1,14 +1,12 @@
 import { getSupabaseAdmin } from '@/lib/supabase'
 import type { VehicleStatus, VehicleState, DriveState, ChargeState, ClimateState, VehicleConfig, ShiftState } from '@/lib/tesla/models'
-import { derivePresence, normalizeChargingConnection } from '@/lib/tesla/normalize'
+import { derivePresence, milesToKm, normalizeChargingConnection } from '@/lib/tesla/normalize'
 import { listAllVehicleRows, newestSnapshot, type VehicleRow } from '@/lib/tesla/service'
 import { persistDerivedHistory, readHistory } from '@/lib/tesla/history'
-import { persistTelemetryProgress } from '@/lib/fleet/telemetry-progress'
-import { persistTelemetrySamples } from '@/lib/fleet/telemetry-samples'
 
 const META_FIELDS = new Set(['CreatedAt', 'IsResend', 'Vin'])
 const DIRECT_VALUE_KEYS = ['stringValue', 'doubleValue', 'floatValue', 'intValue', 'integerValue', 'uintValue', 'numberValue', 'boolValue', 'booleanValue'] as const
-const HISTORY_FIELDS = new Set(['Soc', 'EstBatteryRange', 'IdealBatteryRange', 'VehicleSpeed', 'Gear', 'Location', 'GpsHeading', 'Odometer', 'DetailedChargeState'])
+const HISTORY_FIELDS = new Set(['Soc', 'EstBatteryRange', 'IdealBatteryRange', 'VehicleSpeed', 'Power', 'PowerW', 'VehiclePower', 'PackVoltage', 'PackCurrent', 'Gear', 'Location', 'GpsHeading', 'Odometer', 'DetailedChargeState'])
 
 type JsonRecord = Record<string, unknown>
 
@@ -51,6 +49,8 @@ function emptyDriveState(): DriveState {
   return {
     speedKmh: null,
     powerKw: null,
+    packVoltageV: null,
+    packCurrentA: null,
     shiftState: 'unknown',
     heading: null,
     latitude: null,
@@ -258,6 +258,15 @@ function toNumber(value: unknown): number | null {
   return null
 }
 
+function updatePackPower(status: VehicleStatus) {
+  const voltage = status.drive.packVoltageV
+  const current = status.drive.packCurrentA
+  if (typeof voltage === 'number' && Number.isFinite(voltage) && typeof current === 'number' && Number.isFinite(current)) {
+    // Fleet pack current is negative while the vehicle consumes energy.
+    status.drive.powerKw = Math.round((-voltage * current / 1000) * 10) / 10
+  }
+}
+
 function toBoolean(value: unknown): boolean | null {
   const raw = unwrapTelemetryValue(value)
   if (typeof raw === 'boolean') return raw
@@ -398,7 +407,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'EstBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.estimatedRangeKm = Math.round(value * 10) / 10
+          status.charge.estimatedRangeKm = milesToKm(value)
           if (status.charge.ratedRangeKm === null) status.charge.ratedRangeKm = status.charge.estimatedRangeKm
           mapped = true
         }
@@ -407,7 +416,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'IdealBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.idealRangeKm = Math.round(value * 10) / 10
+          status.charge.idealRangeKm = milesToKm(value)
           mapped = true
         }
         break
@@ -446,7 +455,36 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'Odometer': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.state.odometerKm = Math.round(value * 10) / 10
+          status.state.rawOdometerMiles = value
+          status.state.odometerKm = milesToKm(value)
+          mapped = true
+        }
+        break
+      }
+      case 'Power':
+      case 'PowerW':
+      case 'VehiclePower': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.drive.powerKw = Math.round((value / 1000) * 10) / 10
+          mapped = true
+        }
+        break
+      }
+      case 'PackVoltage': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.drive.packVoltageV = value
+          updatePackPower(status)
+          mapped = true
+        }
+        break
+      }
+      case 'PackCurrent': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.drive.packCurrentA = value
+          updatePackPower(status)
           mapped = true
         }
         break
@@ -659,23 +697,6 @@ export class FleetTelemetryIngester {
     const txid = txidFor(record, applied.fields, applied.collectedAt, vin)
     const inserted = await insertRawEvent({ row, vin, record, txid, fieldNames: applied.fields, collectedAt: applied.collectedAt })
     if (inserted === 'duplicate') return { kind: 'duplicate', vin, txid }
-
-    try {
-      await persistTelemetrySamples(getSupabaseAdmin(), { row, record, observedAt: applied.collectedAt })
-    } catch {
-      // Raw events remain authoritative; sample persistence can be replayed from them.
-    }
-
-    try {
-      await persistTelemetryProgress(getSupabaseAdmin(), {
-        vehicleId: row.id,
-        txid,
-        collectedAt: applied.collectedAt,
-        mappedFields: applied.mappedFields,
-      })
-    } catch {
-      // Progress metadata is non-critical; raw event and snapshot ingestion must continue.
-    }
 
     if (applied.mappedFields.length > 0 && (!entry.lastCollectedAt || Date.parse(applied.collectedAt) >= Date.parse(entry.lastCollectedAt))) {
       await persistTelemetrySnapshot(row, applied.status, applied.collectedAt)

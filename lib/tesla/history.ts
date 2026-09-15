@@ -32,8 +32,10 @@ type SnapshotRow = { state: VehicleStatus | Record<string, unknown>; collected_a
 
 /** A trip starts when the car is moving and ends when it stops or goes quiet. */
 const TRIP_GAP_MS = 30 * 60_000
+const MAX_ENERGY_INTERVAL_MS = 5 * 60_000
 /** Below this odometer change a snapshot run is noise, not a trip. */
 const MIN_TRIP_KM = 0.5
+const MAX_PLAUSIBLE_ODOMETER_DELTA_KM = 5
 
 function asStatus(row: SnapshotRow): VehicleStatus | null {
   const state = row.state as VehicleStatus
@@ -56,6 +58,21 @@ function haversineKm(a: [number, number], b: [number, number]) {
 
 function routeOf(points: Array<{ lat: number; lon: number }>): Array<[number, number]> {
   return points.map((point) => [point.lon, point.lat] as [number, number])
+}
+
+function energyUsedKwh(rows: SnapshotRow[]): number | null {
+  let energy = 0
+  let samples = 0
+  for (let index = 1; index < rows.length; index += 1) {
+    const previous = asStatus(rows[index - 1])
+    const current = asStatus(rows[index])
+    if (!previous || !current || previous.drive.powerKw === null || current.drive.powerKw === null) continue
+    const elapsedHours = (Date.parse(rows[index].collected_at) - Date.parse(rows[index - 1].collected_at)) / 3_600_000
+    if (!Number.isFinite(elapsedHours) || elapsedHours <= 0 || elapsedHours * 3_600_000 > MAX_ENERGY_INTERVAL_MS) continue
+    energy += ((Math.max(0, previous.drive.powerKw) + Math.max(0, current.drive.powerKw)) / 2) * elapsedHours
+    samples += 1
+  }
+  return samples ? Math.round(energy * 1000) / 1000 : null
 }
 
 /**
@@ -89,7 +106,10 @@ export function deriveTrips(snapshots: SnapshotRow[], vehicleId: string): Trip[]
 
     const odometerStart = firstStatus.state.odometerKm
     const odometerEnd = lastStatus.state.odometerKm
-    const odometerDistance = odometerStart !== null && odometerEnd !== null ? Math.max(0, odometerEnd - odometerStart) : null
+    const rawOdometerDistance = odometerStart !== null && odometerEnd !== null ? odometerEnd - odometerStart : null
+    const odometerDistance = rawOdometerDistance !== null && rawOdometerDistance >= 0 && rawOdometerDistance <= MAX_PLAUSIBLE_ODOMETER_DELTA_KM
+      ? rawOdometerDistance
+      : null
     let distanceKm = odometerDistance
     let confidence: Trip['confidence'] = odometerDistance !== null ? 'odometer_delta' : 'snapshot_gap'
     if (distanceKm === null || distanceKm < MIN_TRIP_KM) {
@@ -108,6 +128,7 @@ export function deriveTrips(snapshots: SnapshotRow[], vehicleId: string): Trip[]
     const duration = durationMinutes(first.collected_at, last.collected_at)
     const socStart = firstStatus.charge.stateOfCharge
     const socEnd = lastStatus.charge.stateOfCharge
+    const energy = energyUsedKwh(run)
     const speedValues = run
       .map((row) => asStatus(row)?.drive.speedKmh)
       .filter((value): value is number => typeof value === 'number')
@@ -121,14 +142,16 @@ export function deriveTrips(snapshots: SnapshotRow[], vehicleId: string): Trip[]
       durationMinutes: duration,
       averageSpeedKmh: speedValues.length ? Math.round(speedValues.reduce((sum, value) => sum + value, 0) / speedValues.length) : null,
       maxSpeedKmh: speedValues.length ? Math.round(Math.max(...speedValues)) : null,
-      energyUsedKwh: null,
-      efficiencyWhPerKm: null,
+      energyUsedKwh: energy,
+      efficiencyWhPerKm: energy !== null && distanceKm !== null && distanceKm > 0
+        ? Math.round((energy * 1000 / distanceKm) * 10) / 10
+        : null,
       batteryStartPercent: socStart,
       batteryEndPercent: socEnd,
       odometerStartKm: odometerStart,
       odometerEndKm: odometerEnd,
       startLocation: points.length ? { latitude: points[0].lat, longitude: points[0].lon, heading: null, source: 'live', accuracy: null } : null,
-      endLocation: points.length ? { latitude: points.at(-1)!.lat, longitude: points.at(-1)!.lon, heading: null, source: 'live', accuracy: null } : null,
+      endLocation: points.length ? { latitude: points.at(-1)!.lat, longitude: points.at(-1)!.lon, heading: null, source: endReason === 'stopped' ? 'live' : 'last_known', accuracy: null } : null,
       route: routeOf(points),
       name: null,
       phase: 'unknown',
@@ -322,17 +345,27 @@ export async function readHistory(vehicleId: string, range: HistoryRange = '30d'
 }
 
 function mapStoredTrips(rows: Array<Record<string, unknown>>, vehicleId: string): Trip[] {
-  return rows.map((row) => ({
+  return rows.map((row) => {
+    const energyUsedKwh = row.energy_used_kwh != null
+      ? Number(row.energy_used_kwh)
+      : row.energy_used != null
+        ? Number(row.energy_used)
+        : null
+    const distanceKm = row.distance_km != null ? Number(row.distance_km) : milesToKm(row.distance as number | undefined)
+    const storedEfficiency = row.efficiency_wh_per_km != null ? Number(row.efficiency_wh_per_km) : null
+    return {
     id: String(row.id),
     vehicleId,
     startedAt: String(row.started_at),
     endedAt: (row.ended_at as string | null) ?? null,
-    distanceKm: typeof row.distance_km === 'number' ? row.distance_km : milesToKm(row.distance as number | undefined),
+    distanceKm,
     durationMinutes: (row.duration_minutes as number | null) ?? (row.duration_seconds != null ? Math.round(Number(row.duration_seconds) / 60) : null),
     averageSpeedKmh: (row.average_speed_kmh as number | null) ?? null,
     maxSpeedKmh: (row.max_speed_kmh as number | null) ?? null,
-    energyUsedKwh: (row.energy_used_kwh as number | null) ?? (row.energy_used as number | null) ?? null,
-    efficiencyWhPerKm: (row.efficiency_wh_per_km as number | null) ?? null,
+    energyUsedKwh: Number.isFinite(energyUsedKwh) ? energyUsedKwh : null,
+    efficiencyWhPerKm: Number.isFinite(storedEfficiency) ? storedEfficiency : energyUsedKwh !== null && Number.isFinite(energyUsedKwh) && distanceKm !== null && distanceKm > 0
+      ? Math.round((energyUsedKwh * 1000 / distanceKm) * 10) / 10
+      : null,
     batteryStartPercent: (row.battery_start as number | null) ?? null,
     batteryEndPercent: (row.battery_end as number | null) ?? null,
     odometerStartKm: (row.odometer_start_km as number | null) ?? null,
@@ -344,7 +377,8 @@ function mapStoredTrips(rows: Array<Record<string, unknown>>, vehicleId: string)
     phase: ((row.phase as Trip['phase']) ?? 'unknown'),
     partial: Boolean(row.partial),
     confidence: ((row.confidence as Trip['confidence']) ?? 'odometer_delta'),
-  }))
+    }
+  })
 }
 
 function mapStoredCharging(rows: Array<Record<string, unknown>>, vehicleId: string): ChargingSession[] {
@@ -421,6 +455,10 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
       max_speed_kmh: trip.maxSpeedKmh,
       energy_used_kwh: trip.energyUsedKwh,
       efficiency_wh_per_km: trip.efficiencyWhPerKm,
+      energy_calculation_method: trip.energyUsedKwh === null ? null : 'power_integration',
+      energy_source_unit: 'kWh',
+      telemetry_start_at: trip.startedAt,
+      telemetry_end_at: trip.endedAt,
       odometer_start_km: trip.odometerStartKm,
       odometer_end_km: trip.odometerEndKm,
       battery_start: trip.batteryStartPercent,
@@ -483,26 +521,7 @@ export type PersistReport = { battery: number; trips: number; charging: number; 
 
 async function tryUpsert(table: string, rows: Array<Record<string, unknown>>, dedupeKey: string): Promise<boolean> {
   const supabase = getSupabaseAdmin()
-  const vehicleId = typeof rows[0]?.vehicle_id === 'string' ? rows[0].vehicle_id as string : null
-  const dedupeKeys = rows.map((row) => row.dedupe_key).filter((value): value is string => typeof value === 'string' && value.length > 0)
-
-  let pending = rows
-  if (vehicleId && dedupeKeys.length) {
-    const { data, error: existingError } = await supabase.from(table).select('dedupe_key').eq('vehicle_id', vehicleId).in('dedupe_key', dedupeKeys)
-    if (existingError) {
-      if (/Could not find|does not exist|relation|column/i.test(existingError.message ?? '')) return false
-      console.error(`[tesla] read existing ${table} dedupe keys failed (${dedupeKey})`, existingError.message)
-      return false
-    }
-    const existing = new Set((data ?? []).map((row) => String((row as { dedupe_key?: string | null }).dedupe_key ?? '')).filter(Boolean))
-    pending = rows.filter((row) => {
-      const key = typeof row.dedupe_key === 'string' ? row.dedupe_key : null
-      return !key || !existing.has(key)
-    })
-    if (!pending.length) return true
-  }
-
-  const { error } = await supabase.from(table).insert(pending)
+  const { error } = await supabase.from(table).upsert(rows, { onConflict: 'vehicle_id,dedupe_key', ignoreDuplicates: false })
   if (!error) return true
   if (/duplicate key|unique/i.test(error.message ?? '')) return true
   if (/Could not find|does not exist|relation|column/i.test(error.message ?? '')) return false

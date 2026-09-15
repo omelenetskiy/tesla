@@ -112,10 +112,11 @@ export interface Trip {
   id: string
   startTime: string
   endTime: string
-  distance: number
+  distance: number | null
+  energyUsedKwh: number | null
   startLocation: string
   endLocation: string
-  efficiency: number
+  efficiency: number | null
   status: 'completed' | 'in_progress' | 'cancelled'
 }
 
@@ -132,8 +133,8 @@ export function TripsTable({
     {
       key: 'startTime',
       label: 'Date',
-      render: (value) => new Date(value).toLocaleDateString(),
-      width: 'w-32',
+      render: (value, row) => `${new Date(value).toLocaleDateString()} • ${new Date(row.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${new Date(row.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      width: 'w-48',
     },
     {
       key: 'startLocation',
@@ -150,13 +151,19 @@ export function TripsTable({
     {
       key: 'distance',
       label: 'Distance',
-      render: (value) => `${(value as number).toFixed(1)} km`,
+      render: (value) => value == null ? '—' : `${(value as number).toFixed(1)} km`,
       width: 'w-24',
+    },
+    {
+      key: 'energyUsedKwh',
+      label: 'Energy',
+      render: (value) => value == null ? '—' : `${(value as number).toFixed(2)} kWh`,
+      width: 'w-28',
     },
     {
       key: 'efficiency',
       label: 'Efficiency',
-      render: (value) => `${(value as number).toFixed(0)} Wh/km`,
+      render: (value) => value == null ? '—' : `${(value as number).toFixed(0)} Wh/km`,
       width: 'w-28',
     },
     {

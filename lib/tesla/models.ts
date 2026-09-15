@@ -62,6 +62,8 @@ export type VehicleConfig = {
 export type DriveState = {
   speedKmh: number | null
   powerKw: number | null
+  packVoltageV: number | null
+  packCurrentA: number | null
   shiftState: ShiftState
   heading: number | null
   latitude: number | null
