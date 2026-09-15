@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import crypto from 'crypto'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -14,13 +13,19 @@ interface TelemetryEvent {
   unit: string
   timestamp_utc: string
   observation_time: string
+  session_id?: string
+  session_type?: 'trip' | 'charging' | 'parked'
 }
 
 interface IngestCheckpoint {
   vehicle_id: string
-  last_processed_txid: string
-  open_session_id: string | null
-  session_start_time: string | null
+  checkpoint_type: 'fleet_event'
+  checkpoint_key: string
+  checkpoint_state: {
+    last_processed_txid: string
+    open_session_id: string | null
+    session_start_time: string | null
+  }
 }
 
 // Main ingestion loop - runs 24/7 on VM
@@ -32,7 +37,7 @@ export async function runIngestionLoop() {
       // Get all vehicles to ingest for
       const { data: vehicles, error: vehiclesError } = await supabase
         .from('vehicles')
-        .select('id, vehicle_id')
+        .select('id, vehicle_id, owner_id')
 
       if (vehiclesError) throw vehiclesError
       if (!vehicles || vehicles.length === 0) {
@@ -43,7 +48,7 @@ export async function runIngestionLoop() {
 
       // Process each vehicle
       for (const vehicle of vehicles) {
-        await processVehicleIngest(vehicle.id, vehicle.vehicle_id)
+        await processVehicleIngest(vehicle.id, vehicle.vehicle_id, vehicle.owner_id)
       }
 
       // Sleep briefly before next loop iteration
@@ -55,17 +60,20 @@ export async function runIngestionLoop() {
   }
 }
 
-async function processVehicleIngest(vehicleUuid: string, vehicleId: number) {
+async function processVehicleIngest(vehicleUuid: string, vehicleId: number, ownerId: string) {
   try {
     // Get last checkpoint
     const { data: checkpoint } = await supabase
       .from('telemetry_ingest_checkpoints')
       .select('*')
       .eq('vehicle_id', vehicleUuid)
+      .eq('checkpoint_type', 'fleet_event')
+      .eq('checkpoint_key', 'default')
       .single()
 
-    const lastTxid = checkpoint?.last_processed_txid || '0'
-    const lastSessionId = checkpoint?.open_session_id
+    const checkpointState = checkpoint?.checkpoint_state as IngestCheckpoint['checkpoint_state'] | undefined
+    const lastTxid = checkpointState?.last_processed_txid || '0'
+    const lastSessionId = checkpointState?.open_session_id ?? null
 
     // Fetch new events from Fleet API (starting after last_processed_txid)
     const newEvents = await fetchFleetTelemetry(vehicleId, lastTxid)
@@ -81,22 +89,22 @@ async function processVehicleIngest(vehicleUuid: string, vehicleId: number) {
       if (processedTxids.has(event.txid)) continue
       processedTxids.add(event.txid)
 
-      // Detect session transitions (trip start/end, charging start/end)
-      const sessionTransition = detectSessionTransition(event, currentSessionId)
-      if (sessionTransition.newSession) {
-        currentSessionId = sessionTransition.sessionId
+      // Never infer a session from an individual signal. Samples require
+      // explicit context from the upstream telemetry payload.
+      if (event.session_id?.trim() && event.session_type) {
+        currentSessionId = event.session_id.trim()
+        await recordTelemetrySample({
+          session_id: currentSessionId,
+          session_type: event.session_type,
+          vehicle_id: vehicleUuid,
+          owner_id: ownerId,
+          signal_name: event.signal_name,
+          value: event.value,
+          unit: event.unit,
+          timestamp_utc: event.timestamp_utc,
+          observation_time: event.observation_time,
+        })
       }
-
-      // Record the sample
-      await recordTelemetrySample({
-        session_id: currentSessionId || crypto.randomUUID(),
-        vehicle_id: vehicleUuid,
-        signal_name: event.signal_name,
-        value: event.value,
-        unit: event.unit,
-        timestamp_utc: event.timestamp_utc,
-        observation_time: event.observation_time,
-      })
 
       // Update field freshness
       await updateFieldFreshness(
@@ -109,9 +117,13 @@ async function processVehicleIngest(vehicleUuid: string, vehicleId: number) {
     // Update checkpoint for next iteration
     await upsertIngestCheckpoint({
       vehicle_id: vehicleUuid,
-      last_processed_txid: lastTxid, // Update to latest processed
-      open_session_id: currentSessionId || null,
-      session_start_time: currentSessionId ? new Date().toISOString() : null,
+      checkpoint_type: 'fleet_event',
+      checkpoint_key: 'default',
+      checkpoint_state: {
+        last_processed_txid: newEvents.at(-1)?.txid ?? lastTxid,
+        open_session_id: currentSessionId || null,
+        session_start_time: currentSessionId ? new Date().toISOString() : null,
+      },
     })
   } catch (error) {
     console.error(`❌ Vehicle ${vehicleId} ingestion error:`, error)
@@ -120,7 +132,9 @@ async function processVehicleIngest(vehicleUuid: string, vehicleId: number) {
 
 async function recordTelemetrySample(params: {
   session_id: string
+  session_type: 'trip' | 'charging' | 'parked'
   vehicle_id: string
+  owner_id: string
   signal_name: string
   value: number | string | boolean | null
   unit: string
@@ -130,16 +144,14 @@ async function recordTelemetrySample(params: {
   const { error } = await supabase
     .from('telemetry_session_samples')
     .insert({
-      id: crypto.randomUUID(),
       session_id: params.session_id,
+      session_type: params.session_type,
       vehicle_id: params.vehicle_id,
-      signal_name: params.signal_name,
-      value: params.value,
-      unit: params.unit,
-      timestamp_utc: params.timestamp_utc,
-      observation_time: params.observation_time,
-      receipt_time: new Date().toISOString(),
-      created_at: new Date().toISOString(),
+      owner_id: params.owner_id,
+      field_name: params.signal_name,
+      numeric_value: typeof params.value === 'number' && Number.isFinite(params.value) ? params.value : null,
+      text_value: typeof params.value === 'string' || typeof params.value === 'boolean' ? String(params.value) : null,
+      observed_at: params.observation_time || params.timestamp_utc,
     })
 
   if (error && !error.message.includes('duplicate')) throw error
@@ -155,11 +167,10 @@ async function updateFieldFreshness(
     .upsert(
       {
         vehicle_id: vehicleId,
-        signal_name: signalName,
+        field_name: signalName,
         last_observed_at: timestamp.toISOString(),
-        freshness_seconds: 0,
       },
-      { onConflict: 'vehicle_id,signal_name' }
+      { onConflict: 'vehicle_id,field_name' }
     )
 
   if (error) throw error
@@ -168,25 +179,11 @@ async function updateFieldFreshness(
 async function upsertIngestCheckpoint(checkpoint: IngestCheckpoint) {
   const { error } = await supabase
     .from('telemetry_ingest_checkpoints')
-    .upsert(checkpoint, { onConflict: 'vehicle_id' })
+    .upsert(checkpoint, { onConflict: 'vehicle_id,checkpoint_type,checkpoint_key' })
 
   if (error) throw error
 }
 
-function detectSessionTransition(event: TelemetryEvent, currentSession: string | null) {
-  const isCharging = event.signal_name === 'is_charging' && event.value === true
-  const isSleeping = event.signal_name === 'is_sleeping' && event.value === true
-
-  if (isCharging && !currentSession?.startsWith('charging-')) {
-    return { newSession: true, sessionId: `charging-${Date.now()}` }
-  }
-
-  if (!isCharging && currentSession?.startsWith('charging-')) {
-    return { newSession: true, sessionId: `trip-${Date.now()}` }
-  }
-
-  return { newSession: false, sessionId: currentSession }
-}
 
 async function fetchFleetTelemetry(vehicleId: number, lastTxid: string): Promise<TelemetryEvent[]> {
   // This would call actual Tesla Fleet API
