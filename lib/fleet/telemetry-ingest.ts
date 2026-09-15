@@ -8,7 +8,7 @@ import { persistTelemetrySamples } from '@/lib/fleet/telemetry-samples'
 
 const META_FIELDS = new Set(['CreatedAt', 'IsResend', 'Vin'])
 const DIRECT_VALUE_KEYS = ['stringValue', 'doubleValue', 'floatValue', 'intValue', 'integerValue', 'uintValue', 'numberValue', 'boolValue', 'booleanValue'] as const
-const HISTORY_FIELDS = new Set(['Soc', 'EstBatteryRange', 'IdealBatteryRange', 'VehicleSpeed', 'Power', 'PowerW', 'VehiclePower', 'PackVoltage', 'PackCurrent', 'Gear', 'Location', 'GpsHeading', 'Odometer', 'DetailedChargeState'])
+const HISTORY_FIELDS = new Set(['Soc', 'BatteryLevel', 'RatedRange', 'EstBatteryRange', 'IdealBatteryRange', 'VehicleSpeed', 'PackVoltage', 'PackCurrent', 'Gear', 'Location', 'GpsHeading', 'Odometer', 'ChargeLimitSoc', 'ChargerVoltage', 'ChargeAmps', 'ACChargingPower', 'DCChargingPower', 'FastChargerPresent', 'FastChargerType', 'NotEnoughPowerToHeat', 'DetailedChargeState'])
 
 type JsonRecord = Record<string, unknown>
 
@@ -401,7 +401,23 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'Soc': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.stateOfCharge = Math.round(value)
+          status.charge.stateOfCharge = value
+          mapped = true
+        }
+        break
+      }
+      case 'BatteryLevel': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.charge.stateOfCharge = value
+          mapped = true
+        }
+        break
+      }
+      case 'RatedRange': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.charge.ratedRangeKm = value
           mapped = true
         }
         break
@@ -409,7 +425,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'EstBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.estimatedRangeKm = Math.round(value * 10) / 10
+          status.charge.estimatedRangeKm = value
           if (status.charge.ratedRangeKm === null) status.charge.ratedRangeKm = status.charge.estimatedRangeKm
           mapped = true
         }
@@ -418,7 +434,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'IdealBatteryRange': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.idealRangeKm = Math.round(value * 10) / 10
+          status.charge.idealRangeKm = value
           mapped = true
         }
         break
@@ -426,7 +442,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'VehicleSpeed': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.drive.speedKmh = Math.round(Math.max(0, value))
+          status.drive.speedKmh = value
           mapped = true
         }
         break
@@ -434,6 +450,14 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'Gear': {
         status.drive.shiftState = parseShift(rawValue)
         mapped = true
+        break
+      }
+      case 'ChargeLimitSoc': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.charge.chargeLimitPercent = value
+          mapped = true
+        }
         break
       }
       case 'Location': {
@@ -449,7 +473,7 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'GpsHeading': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.drive.heading = Math.round(value)
+          status.drive.heading = value
           mapped = true
         }
         break
@@ -459,16 +483,6 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
         if (value !== null) {
           status.state.rawOdometer = value
           status.state.odometerKm = value
-          mapped = true
-        }
-        break
-      }
-      case 'Power':
-      case 'PowerW':
-      case 'VehiclePower': {
-        const value = toNumber(rawValue)
-        if (value !== null) {
-          status.drive.powerKw = value
           mapped = true
         }
         break
@@ -499,10 +513,34 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
         }
         break
       }
+      case 'FastChargerPresent': {
+        const value = toBoolean(rawValue)
+        if (value !== null) {
+          status.charge.fastChargerPresent = value
+          mapped = true
+        }
+        break
+      }
+      case 'FastChargerType': {
+        const value = toStringValue(rawValue)
+        if (value) {
+          status.charge.fastChargerType = value
+          mapped = true
+        }
+        break
+      }
+      case 'NotEnoughPowerToHeat': {
+        const value = toBoolean(rawValue)
+        if (value !== null) {
+          status.charge.notEnoughPowerToHeat = value
+          mapped = true
+        }
+        break
+      }
       case 'ChargerVoltage': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.chargerVoltage = Math.round(value * 10) / 10
+          status.charge.chargerVoltage = value
           mapped = true
         }
         break
@@ -510,7 +548,16 @@ export function applyTelemetryRecord(base: VehicleStatus, record: TelemetryLogRe
       case 'ChargeAmps': {
         const value = toNumber(rawValue)
         if (value !== null) {
-          status.charge.chargerActualCurrentA = Math.round(value * 10) / 10
+          status.charge.chargerActualCurrentA = value
+          mapped = true
+        }
+        break
+      }
+      case 'ACChargingPower':
+      case 'DCChargingPower': {
+        const value = toNumber(rawValue)
+        if (value !== null) {
+          status.charge.chargerPowerKw = value
           mapped = true
         }
         break

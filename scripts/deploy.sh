@@ -85,6 +85,7 @@ sync_to_vm() {
         --exclude='dist' \
         --exclude='.DS_Store' \
         --exclude='.netlify' \
+        --exclude='.fleet-telemetry' \
         --exclude='deploy/fleet-telemetry/certs' \
         -e "$SSH_CMD" \
         . "$VM_USER@$VM_HOST:$VM_PATH/"
