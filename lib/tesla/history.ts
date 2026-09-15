@@ -460,7 +460,6 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
       energy_used_kwh: trip.energyUsedKwh,
       efficiency_wh_per_km: trip.efficiencyWhPerKm,
       energy_calculation_method: trip.energyUsedKwh === null ? null : 'power_integration',
-      energy_source_unit: 'kWh',
       telemetry_start_at: trip.startedAt,
       telemetry_end_at: trip.endedAt,
       odometer_start_km: trip.odometerStartKm,
