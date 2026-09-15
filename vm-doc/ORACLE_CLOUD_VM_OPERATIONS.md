@@ -2,6 +2,8 @@
 
 This is the authoritative instruction for an LLM agent operating the DriveScope Oracle Cloud VM: SSH access, deployment, process management, Docker telemetry, migrations, backfill, verification, rollback, and safe troubleshooting.
 
+For the complete list of required private material and recovery rules, read [`SECRET_MATERIAL_MANIFEST.md`](./SECRET_MATERIAL_MANIFEST.md). That file is an inventory/template only and intentionally contains no real secret values.
+
 > **Current topology:** the frontend and Tesla Fleet Telemetry receiver run on one Oracle VM. Netlify is not used.
 
 ## 1. Architecture
@@ -810,4 +812,3 @@ Do not aggressively wake/poll a sleeping vehicle.
 - Raw events are the replay/audit source of truth.
 - Always verify database counts and PM2 status after a deploy.
 - Keep the VM topology: app and telemetry are both hosted on the VM; Netlify is not part of the deployment path.
-
