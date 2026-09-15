@@ -3,6 +3,8 @@ import type { VehicleStatus, VehicleState, DriveState, ChargeState, ClimateState
 import { derivePresence, normalizeChargingConnection } from '@/lib/tesla/normalize'
 import { listAllVehicleRows, newestSnapshot, type VehicleRow } from '@/lib/tesla/service'
 import { persistDerivedHistory, readHistory } from '@/lib/tesla/history'
+import { persistTelemetryProgress } from '@/lib/fleet/telemetry-progress'
+import { persistTelemetrySamples } from '@/lib/fleet/telemetry-samples'
 
 const META_FIELDS = new Set(['CreatedAt', 'IsResend', 'Vin'])
 const DIRECT_VALUE_KEYS = ['stringValue', 'doubleValue', 'floatValue', 'intValue', 'integerValue', 'uintValue', 'numberValue', 'boolValue', 'booleanValue'] as const
@@ -18,6 +20,8 @@ type TelemetryMetadata = {
   txtype?: string
   version?: string
   vin?: string
+  session_id?: string
+  session_type?: 'trip' | 'charging' | 'parked'
 }
 
 export type TelemetryLogRecord = {
@@ -655,6 +659,23 @@ export class FleetTelemetryIngester {
     const txid = txidFor(record, applied.fields, applied.collectedAt, vin)
     const inserted = await insertRawEvent({ row, vin, record, txid, fieldNames: applied.fields, collectedAt: applied.collectedAt })
     if (inserted === 'duplicate') return { kind: 'duplicate', vin, txid }
+
+    try {
+      await persistTelemetrySamples(getSupabaseAdmin(), { row, record, observedAt: applied.collectedAt })
+    } catch {
+      // Raw events remain authoritative; sample persistence can be replayed from them.
+    }
+
+    try {
+      await persistTelemetryProgress(getSupabaseAdmin(), {
+        vehicleId: row.id,
+        txid,
+        collectedAt: applied.collectedAt,
+        mappedFields: applied.mappedFields,
+      })
+    } catch {
+      // Progress metadata is non-critical; raw event and snapshot ingestion must continue.
+    }
 
     if (applied.mappedFields.length > 0 && (!entry.lastCollectedAt || Date.parse(applied.collectedAt) >= Date.parse(entry.lastCollectedAt))) {
       await persistTelemetrySnapshot(row, applied.status, applied.collectedAt)
