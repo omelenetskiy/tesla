@@ -441,6 +441,7 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
       longitude: point.location?.longitude ?? null,
       partial: point.partial,
       collected_at: point.at,
+      timestamp: point.at,
       dedupe_key: `s:${point.at}`,
     }))
     const written = await tryUpsert('battery_snapshots', rows, `s:${input.bundle.battery.at(-1)?.at ?? ''}`)
@@ -451,6 +452,8 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
   for (const trip of input.bundle.trips) {
     const written = await tryUpsert('trips', [{
       vehicle_id: input.vehicleId,
+      start_time: trip.startedAt,
+      end_time: trip.endedAt ?? trip.startedAt,
       started_at: trip.startedAt,
       ended_at: trip.endedAt,
       distance_km: trip.distanceKm,
@@ -486,6 +489,8 @@ export async function persistDerivedHistory(input: { vehicleId: string; ownerId:
   for (const session of input.bundle.charging) {
     const written = await tryUpsert('charging_sessions', [{
       vehicle_id: input.vehicleId,
+      start_time: session.startedAt,
+      end_time: session.endedAt ?? session.startedAt,
       started_at: session.startedAt,
       ended_at: session.endedAt,
       duration_minutes: session.durationMinutes,
