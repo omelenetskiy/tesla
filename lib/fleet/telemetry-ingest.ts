@@ -771,8 +771,10 @@ export class FleetTelemetryIngester {
       if (applied.mappedFields.some((field) => HISTORY_FIELDS.has(field))) {
         try {
           await refreshDerivedHistory(row)
-        } catch {
-          // A history roll-up failure must not stop raw event or snapshot ingestion.
+          } catch (error) {
+            // A history roll-up failure must not stop raw event or snapshot ingestion,
+            // but it must be observable so derived trips are not silently lost.
+            console.error('[telemetry] derived history refresh failed', error instanceof Error ? error.message : error)
         }
       }
     }
