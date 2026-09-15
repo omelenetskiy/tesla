@@ -526,7 +526,10 @@ async function tryUpsert(table: string, rows: Array<Record<string, unknown>>, de
   const supabase = getSupabaseAdmin()
   const { error } = await supabase.from(table).upsert(rows, { onConflict: 'vehicle_id,dedupe_key', ignoreDuplicates: false })
   if (!error) return true
-  if (/duplicate key|unique/i.test(error.message ?? '')) return true
+  if (/duplicate key|unique/i.test(error.message ?? '')) {
+    console.error(`[tesla] persist ${table} conflict (${dedupeKey})`, error.message)
+    return false
+  }
   if (/Could not find|does not exist|relation|column/i.test(error.message ?? '')) {
     console.error(`[tesla] persist ${table} schema error (${dedupeKey})`, error.message)
     return false
