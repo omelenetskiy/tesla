@@ -117,7 +117,9 @@ cache-first sleeping-vehicle reads, explicit freshness/coverage metadata, and ow
 - [x] Do not attribute energy to HVAC/Sentry based on enabled features
 - [x] Include coverage & calculation metadata in responses
 - [x] Add adapter from `telemetry_session_samples` rows to verified power samples
-- [ ] Wire verified accounting to persisted telemetry session samples
+- [x] Wire verified accounting to persisted telemetry session samples
+  - ✅ `lib/energy/telemetry-repository.ts` applies owner/vehicle/session/time filters,
+    validates rows, and returns calculation method, sample count, and coverage metadata
 
 ---
 
