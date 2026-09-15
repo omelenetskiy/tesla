@@ -23,17 +23,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       id: session.id,
       startTime: session.startedAt,
       endTime: session.endedAt ?? session.startedAt,
-      location: {
-        lat: session.location?.latitude ?? 0,
-        lng: session.location?.longitude ?? 0,
+      location: session.location
+        ? {
+        lat: session.location.latitude,
+        lng: session.location.longitude,
         name: session.locationLabel ?? 'Charging location',
-      },
+          }
+        : null,
       chargerType: session.chargerType === 'DC' ? 'DC' : session.fastCharger ? 'DC' : 'L2',
-      startSoc: session.batteryStartPercent ?? 0,
-      endSoc: session.batteryEndPercent ?? 0,
-      energyAdded: session.energyAddedKwh ?? 0,
-      maxPower: session.peakPowerKw ?? session.averagePowerKw ?? 0,
-      avgPower: session.averagePowerKw ?? 0,
+      startSoc: session.batteryStartPercent,
+      endSoc: session.batteryEndPercent,
+      energyAdded: session.energyAddedKwh,
+      maxPower: session.peakPowerKw ?? session.averagePowerKw,
+      avgPower: session.averagePowerKw,
       cost: null,
       samples: [],
       samplesVerified: false,

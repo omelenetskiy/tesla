@@ -28,7 +28,7 @@ interface TripDetail {
   id: string
   startTime: string
   endTime: string
-  distance: number
+  distance: number | null
   startLocation: {
     lat: number
     lng: number
@@ -39,12 +39,13 @@ interface TripDetail {
     lng: number
     name: string
   } | null
-  efficiency: number
-  startSoc: number
-  endSoc: number
-  maxSpeed: number
-  avgSpeed: number
-  elevation: number
+  efficiency: number | null
+  energyUsedKwh: number | null
+  startSoc: number | null
+  endSoc: number | null
+  maxSpeed: number | null
+  avgSpeed: number | null
+  elevation: number | null
   samples: TripSample[]
 }
 
@@ -97,7 +98,7 @@ export default function TripDetailPageV2({ params }: PageProps) {
   }
 
   const duration = (new Date(trip.endTime).getTime() - new Date(trip.startTime).getTime()) / 1000 / 60
-  const energyUsed = (trip.startSoc - trip.endSoc) * 0.75
+  const unavailable = 'Unavailable'
   const hasMapPoints = Boolean(trip.startLocation && trip.endLocation)
 
   return (
@@ -118,7 +119,7 @@ export default function TripDetailPageV2({ params }: PageProps) {
           startLng={trip.startLocation!.lng}
           endLat={trip.endLocation!.lat}
           endLng={trip.endLocation!.lng}
-          distance={trip.distance}
+          distance={trip.distance ?? 0}
           samples={trip.samples}
         />
       ) : (
@@ -131,12 +132,12 @@ export default function TripDetailPageV2({ params }: PageProps) {
 
       <MetricsSummary
         metrics={[
-          { label: 'Distance', value: trip.distance.toFixed(1), unit: 'km' },
-          { label: 'Efficiency', value: trip.efficiency.toFixed(0), unit: 'Wh/km' },
-          { label: 'Energy Used', value: energyUsed.toFixed(1), unit: 'kWh' },
-          { label: 'Max Speed', value: trip.maxSpeed.toFixed(0), unit: 'km/h' },
-          { label: 'Avg Speed', value: trip.avgSpeed.toFixed(0), unit: 'km/h' },
-          { label: 'Elevation', value: trip.elevation.toFixed(0), unit: 'm' },
+          { label: 'Distance', value: trip.distance == null ? unavailable : trip.distance.toFixed(1), unit: trip.distance == null ? undefined : 'km' },
+          { label: 'Efficiency', value: trip.efficiency == null ? unavailable : trip.efficiency.toFixed(0), unit: trip.efficiency == null ? undefined : 'Wh/km' },
+          { label: 'Energy Used', value: trip.energyUsedKwh == null ? unavailable : trip.energyUsedKwh.toFixed(1), unit: trip.energyUsedKwh == null ? undefined : 'kWh' },
+          { label: 'Max Speed', value: trip.maxSpeed == null ? unavailable : trip.maxSpeed.toFixed(0), unit: trip.maxSpeed == null ? undefined : 'km/h' },
+          { label: 'Avg Speed', value: trip.avgSpeed == null ? unavailable : trip.avgSpeed.toFixed(0), unit: trip.avgSpeed == null ? undefined : 'km/h' },
+          { label: 'Elevation', value: trip.elevation == null ? unavailable : trip.elevation.toFixed(0), unit: trip.elevation == null ? undefined : 'm' },
         ]}
       />
 
@@ -181,7 +182,7 @@ export default function TripDetailPageV2({ params }: PageProps) {
           {
             time: new Date(new Date(trip.startTime).getTime() + (duration / 2) * 60000).toISOString(),
             title: 'Halfway',
-            description: `${(trip.distance / 2).toFixed(1)} km traveled`,
+            description: trip.distance == null ? 'Distance unavailable' : `${(trip.distance / 2).toFixed(1)} km traveled`,
             status: 'completed' as const,
           },
           {

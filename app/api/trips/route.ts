@@ -31,14 +31,14 @@ export async function GET(request: NextRequest) {
         id: trip.id,
         startTime: trip.startedAt,
         endTime: trip.endedAt ?? trip.startedAt,
-        distance: trip.distanceKm ?? 0,
+        distance: trip.distanceKm,
         startLocation,
         endLocation,
-        efficiency: trip.efficiencyWhPerKm ?? 0,
-        startSoc: trip.batteryStartPercent ?? 0,
-        endSoc: trip.batteryEndPercent ?? 0,
-        maxSpeed: trip.maxSpeedKmh ?? 0,
-        avgSpeed: trip.averageSpeedKmh ?? 0,
+        efficiency: trip.efficiencyWhPerKm,
+        startSoc: trip.batteryStartPercent,
+        endSoc: trip.batteryEndPercent,
+        maxSpeed: trip.maxSpeedKmh,
+        avgSpeed: trip.averageSpeedKmh,
         confidence: trip.confidence,
         partial: trip.partial,
       }
@@ -66,3 +66,4 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+

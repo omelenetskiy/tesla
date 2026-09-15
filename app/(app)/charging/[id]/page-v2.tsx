@@ -35,13 +35,13 @@ interface ChargingSession {
     lat: number
     lng: number
     name: string
-  }
+  } | null
   chargerType: ChargerType
-  startSoc: number
-  endSoc: number
-  energyAdded: number
-  maxPower: number
-  avgPower: number
+  startSoc: number | null
+  endSoc: number | null
+  energyAdded: number | null
+  maxPower: number | null
+  avgPower: number | null
   cost?: number | null
   samples: ChargingSample[]
 }
@@ -123,9 +123,9 @@ export default function ChargingDetailPageV2({ params }: PageProps) {
               Charging session
             </h1>
             <p className="mt-3 max-w-[56ch] text-base leading-7 text-ink-secondary">
-              {new Date(session.startTime).toLocaleDateString()} at {session.location.name}.{' '}
+              {new Date(session.startTime).toLocaleDateString()} at {session.location?.name ?? 'unknown location'}.{' '}
               {Math.max(1, Math.round(duration))} minutes of charging and{' '}
-              {session.energyAdded.toFixed(1)} kWh added.
+              {session.energyAdded == null ? 'an unknown amount of energy' : `${session.energyAdded.toFixed(1)} kWh added`}.
             </p>
           </div>
 
@@ -153,11 +153,11 @@ export default function ChargingDetailPageV2({ params }: PageProps) {
 
       <MetricsSummary
         metrics={[
-          { label: 'Energy added', value: session.energyAdded.toFixed(1), unit: 'kWh', trend: 'up' },
-          { label: 'Start SOC', value: session.startSoc.toFixed(0), unit: '%', trend: 'stable' },
-          { label: 'End SOC', value: session.endSoc.toFixed(0), unit: '%', trend: 'up' },
-          { label: 'Max power', value: session.maxPower.toFixed(0), unit: 'kW', trend: 'up' },
-          { label: 'Avg power', value: session.avgPower.toFixed(0), unit: 'kW', trend: 'stable' },
+          { label: 'Energy added', value: session.energyAdded == null ? 'Unavailable' : session.energyAdded.toFixed(1), unit: session.energyAdded == null ? undefined : 'kWh', trend: session.energyAdded == null ? undefined : 'up' },
+          { label: 'Start SOC', value: session.startSoc == null ? 'Unavailable' : session.startSoc.toFixed(0), unit: session.startSoc == null ? undefined : '%', trend: session.startSoc == null ? undefined : 'stable' },
+          { label: 'End SOC', value: session.endSoc == null ? 'Unavailable' : session.endSoc.toFixed(0), unit: session.endSoc == null ? undefined : '%', trend: session.endSoc == null ? undefined : 'up' },
+          { label: 'Max power', value: session.maxPower == null ? 'Unavailable' : session.maxPower.toFixed(0), unit: session.maxPower == null ? undefined : 'kW', trend: session.maxPower == null ? undefined : 'up' },
+          { label: 'Avg power', value: session.avgPower == null ? 'Unavailable' : session.avgPower.toFixed(0), unit: session.avgPower == null ? undefined : 'kW', trend: session.avgPower == null ? undefined : 'stable' },
           ...(typeof session.cost === 'number'
             ? [{ label: 'Cost', value: session.cost.toFixed(2), unit: '$', trend: 'stable' as const }]
             : []),
@@ -173,11 +173,15 @@ export default function ChargingDetailPageV2({ params }: PageProps) {
             <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-ink">Charging map</h2>
           </div>
           <div className="p-3">
-            <ChargingLocationMap
-              latitude={session.location.lat}
-              longitude={session.location.lng}
-              name={session.location.name}
-            />
+            {session.location ? (
+              <ChargingLocationMap
+                latitude={session.location.lat}
+                longitude={session.location.lng}
+                name={session.location.name}
+              />
+            ) : (
+              <Alert variant="warning" title="Map unavailable" message="Charging coordinates are missing for this session." />
+            )}
           </div>
         </Card>
 
@@ -208,20 +212,20 @@ export default function ChargingDetailPageV2({ params }: PageProps) {
                 <MapPin className="size-3.5" />
                 Location
               </div>
-              <div className="mt-3 text-lg font-semibold text-ink">{session.location.name}</div>
+              <div className="mt-3 text-lg font-semibold text-ink">{session.location?.name ?? 'Unknown location'}</div>
               <div className="mt-1 text-sm text-ink-secondary">
-                {session.location.lat.toFixed(5)}, {session.location.lng.toFixed(5)}
+                {session.location ? `${session.location.lat.toFixed(5)}, ${session.location.lng.toFixed(5)}` : 'No coordinates'}
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-line p-4">
                 <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">From</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{session.startSoc.toFixed(0)}%</div>
+                <div className="mt-2 text-lg font-semibold text-ink">{session.startSoc == null ? 'Unavailable' : `${session.startSoc.toFixed(0)}%`}</div>
               </div>
               <div className="rounded-2xl border border-line p-4">
                 <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">To</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{session.endSoc.toFixed(0)}%</div>
+                <div className="mt-2 text-lg font-semibold text-ink">{session.endSoc == null ? 'Unavailable' : `${session.endSoc.toFixed(0)}%`}</div>
               </div>
             </div>
           </div>
