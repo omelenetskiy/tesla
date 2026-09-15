@@ -4,45 +4,9 @@ import { readHistory } from '@/lib/tesla/history'
 import { resolveVehicle } from '@/lib/tesla/service'
 import { getSupabaseAdmin } from '@/lib/supabase'
 import type { Trip } from '@/lib/tesla/models'
-import { buildRouteForSamples, resolveTripLocations } from '@/lib/tesla/trip-locations'
+import { resolveTripLocations } from '@/lib/tesla/trip-locations'
 
 export const dynamic = 'force-dynamic'
-
-type TripSample = {
-  timestamp: string
-  lat: number
-  lng: number
-  speed: number
-  soc: number
-  power: number
-}
-
-function buildSamples(route: Array<[number, number]>, startedAt: string, endedAt: string | null, startSoc: number | null, endSoc: number | null): TripSample[] {
-  if (!route.length) return []
-
-  const start = Date.parse(startedAt)
-  const end = endedAt ? Date.parse(endedAt) : start + 30 * 60_000
-  const step = route.length > 1 ? (end - start) / (route.length - 1) : 0
-
-  return route.map((point, index) => {
-    const progress = route.length > 1 ? index / (route.length - 1) : 1
-    const soc =
-      typeof startSoc === 'number' && typeof endSoc === 'number'
-        ? Math.round((startSoc + (endSoc - startSoc) * progress) * 10) / 10
-        : typeof startSoc === 'number'
-          ? startSoc
-          : 0
-
-    return {
-      timestamp: new Date(start + step * index).toISOString(),
-      lng: point[0],
-      lat: point[1],
-      speed: index === 0 || index === route.length - 1 ? 0 : 55,
-      soc,
-      power: index === 0 || index === route.length - 1 ? 0 : -30,
-    }
-  })
-}
 
 async function readTripById(vehicleId: string, tripId: string): Promise<Trip | null> {
   const supabase = getSupabaseAdmin()
@@ -105,16 +69,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const trip = history.trips.find((item) => item.id === id) ?? (await readTripById(row.id, id))
     if (!trip) return NextResponse.json({ message: 'Trip not found' }, { status: 404 })
 
-    const { startLocation, endLocation, routePoints } = resolveTripLocations(trip)
-    const routeForSamples = buildRouteForSamples(routePoints, startLocation, endLocation)
-
-    const samples = buildSamples(
-      routeForSamples,
-      trip.startedAt,
-      trip.endedAt,
-      trip.batteryStartPercent,
-      trip.batteryEndPercent
-    )
+    const { startLocation, endLocation } = resolveTripLocations(trip)
 
     return NextResponse.json({
       id: trip.id,
@@ -129,7 +84,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       maxSpeed: trip.maxSpeedKmh ?? 0,
       avgSpeed: trip.averageSpeedKmh ?? 0,
       elevation: 0,
-      samples,
+      samples: [],
+      samplesVerified: false,
+      samplesOrigin: 'unavailable',
       confidence: trip.confidence,
       partial: trip.partial,
     })
@@ -140,4 +97,3 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     )
   }
 }
-

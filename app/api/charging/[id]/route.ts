@@ -5,37 +5,6 @@ import { resolveVehicle } from '@/lib/tesla/service'
 
 export const dynamic = 'force-dynamic'
 
-type ChargingSample = {
-  timestamp: string
-  soc: number
-  power: number
-}
-
-function buildSamples(startedAt: string, endedAt: string | null, startSoc: number | null, endSoc: number | null, peakPower: number | null): ChargingSample[] {
-  const start = Date.parse(startedAt)
-  const end = endedAt ? Date.parse(endedAt) : start + 45 * 60_000
-  const ticks = 4
-  const step = (end - start) / (ticks - 1)
-
-  return Array.from({ length: ticks }).map((_, index) => {
-    const progress = index / (ticks - 1)
-    const soc =
-      typeof startSoc === 'number' && typeof endSoc === 'number'
-        ? Math.round((startSoc + (endSoc - startSoc) * progress) * 10) / 10
-        : typeof endSoc === 'number'
-          ? endSoc
-          : 0
-
-    const powerShape = [0, peakPower ?? 120, Math.round((peakPower ?? 120) * 0.7), Math.round((peakPower ?? 120) * 0.3)]
-
-    return {
-      timestamp: new Date(start + step * index).toISOString(),
-      soc,
-      power: powerShape[index],
-    }
-  })
-}
-
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const user = await getAuthenticatedUser()
@@ -66,13 +35,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       maxPower: session.peakPowerKw ?? session.averagePowerKw ?? 0,
       avgPower: session.averagePowerKw ?? 0,
       cost: null,
-      samples: buildSamples(
-        session.startedAt,
-        session.endedAt,
-        session.batteryStartPercent,
-        session.batteryEndPercent,
-        session.peakPowerKw
-      ),
+      samples: [],
+      samplesVerified: false,
+      samplesOrigin: 'unavailable',
       confidence: session.confidence,
       completed: session.completed,
     })
@@ -83,4 +48,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     )
   }
 }
+
 
