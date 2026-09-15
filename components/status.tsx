@@ -1,7 +1,8 @@
 'use client'
 
 import React from 'react'
-import { Card, Badge } from '@/components/ui/primitives'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 
 /**
  * Status Components for different vehicle states

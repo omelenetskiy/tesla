@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { Badge } from '@/components/ui/primitives'
+import { Badge } from '@/components/ui/badge'
 
 interface Column<T> {
   key: keyof T

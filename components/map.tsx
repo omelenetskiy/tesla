@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react'
 import { buildBasemapStyle } from '@/lib/map/basemap'
-import { Card } from '@/components/ui/primitives'
+import { Card } from '@/components/ui/card'
 
 type Coordinate = { lat: number; lng: number }
 interface MapProps { latitude: number; longitude: number; zoom?: number; tripCoordinates?: Coordinate[]; style?: 'light' | 'dark' }

@@ -1,7 +1,9 @@
 'use client'
 
 import React from 'react'
-import { Input, Button, Card } from '@/components/ui/primitives'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
 
 export function SettingsForm({
   onSave,

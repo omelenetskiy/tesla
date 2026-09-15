@@ -1,7 +1,8 @@
 'use client'
 
 import React, { ReactNode } from 'react'
-import { Card, Button } from '@/components/ui/primitives'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   children: ReactNode

@@ -1,7 +1,10 @@
 'use client'
 
 import React from 'react'
-import { Button, Input, Card, Badge } from '@/components/ui/primitives'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 
 // Form components
 interface FormProps extends React.FormHTMLAttributes<HTMLFormElement> {

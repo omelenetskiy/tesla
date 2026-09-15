@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { Card } from '@/components/ui/primitives'
+import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 interface DataPoint {

@@ -8,7 +8,8 @@ import {
   Route,
   TimerReset,
 } from 'lucide-react'
-import { Card, Badge } from '@/components/ui/primitives'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { ProgressBar } from '@/components/ui/charts'
 import { cn } from '@/lib/utils'
 
