@@ -79,6 +79,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       startLocation,
       endLocation,
       efficiency: trip.efficiencyWhPerKm ?? 0,
+      energyUsedKwh: trip.energyUsedKwh,
       startSoc: trip.batteryStartPercent ?? 0,
       endSoc: trip.batteryEndPercent ?? 0,
       maxSpeed: trip.maxSpeedKmh ?? 0,
@@ -97,3 +98,4 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     )
   }
 }
+

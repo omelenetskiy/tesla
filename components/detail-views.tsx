@@ -13,6 +13,7 @@ export interface TripDetail {
   startLocation: { lat: number; lng: number; name: string }
   endLocation: { lat: number; lng: number; name: string }
   efficiency: number
+  energyUsedKwh?: number | null
   startSoc: number
   endSoc: number
   maxSpeed: number
@@ -31,8 +32,6 @@ export interface TripDetail {
 export function TripDetailView({ trip }: { trip: TripDetail }) {
   const duration =
     (new Date(trip.endTime).getTime() - new Date(trip.startTime).getTime()) / 1000 / 60
-
-  const energyUsed = (trip.startSoc - trip.endSoc) * 75 // Assuming 75 kWh battery
 
   const chart_data = trip.samples.map((s) => ({
     timestamp: s.timestamp,
@@ -93,7 +92,7 @@ export function TripDetailView({ trip }: { trip: TripDetail }) {
           },
           {
             label: 'Energy Used',
-            value: energyUsed.toFixed(1),
+            value: trip.energyUsedKwh == null ? '—' : trip.energyUsedKwh.toFixed(1),
             unit: 'kWh',
           },
           {
