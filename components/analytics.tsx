@@ -2,6 +2,7 @@
 
 import React from 'react'
 import { Card } from '@/components/ui/card'
+import { formatKwhPer100Km } from '@/lib/format'
 
 /**
  * Advanced Analytics Components for Trip & Charging Data
@@ -23,19 +24,19 @@ export function EfficiencyTrend({ data }: { data: Array<{ date: string; efficien
         <div>
           <div className="text-sm text-gray-600 dark:text-gray-400">Current</div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {data[data.length - 1].efficiency.toFixed(0)} Wh/km
+            {formatKwhPer100Km(data[data.length - 1].efficiency)}
           </div>
         </div>
         <div>
           <div className="text-sm text-gray-600 dark:text-gray-400">Average</div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {avgEfficiency.toFixed(0)} Wh/km
+            {formatKwhPer100Km(avgEfficiency)}
           </div>
         </div>
         <div>
           <div className="text-sm text-gray-600 dark:text-gray-400">Trend</div>
           <div className={`text-2xl font-bold ${trendColor}`}>
-            {trend > 0 ? '+' : ''}{trend.toFixed(0)} Wh/km
+            {trend > 0 ? '+' : ''}{(trend / 10).toFixed(1)} kWh/100 km
           </div>
         </div>
       </div>
@@ -49,7 +50,7 @@ export function EfficiencyTrend({ data }: { data: Array<{ date: string; efficien
             style={{
               height: `${(d.efficiency / Math.max(...data.map((x) => x.efficiency))) * 100}%`,
             }}
-            title={`${d.date}: ${d.efficiency.toFixed(0)} Wh/km`}
+            title={`${d.date}: ${formatKwhPer100Km(d.efficiency)}`}
           />
         ))}
       </div>
@@ -81,7 +82,7 @@ export function DistanceEfficiencyAnalysis({
         <div>
           <div className="text-sm text-gray-600 dark:text-gray-400">Avg Efficiency</div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {avgEfficiency.toFixed(0)} Wh/km
+            {formatKwhPer100Km(avgEfficiency)}
           </div>
         </div>
       </div>
@@ -129,7 +130,7 @@ export function EnergySavingsAnalysis({
         </div>
         <div className="bg-green-50 dark:bg-green-900/20 p-3 rounded-lg">
           <div className="text-sm text-green-900 dark:text-green-100">
-            Potential savings by maintaining {(avgEfficiency - 20).toFixed(0)} Wh/km: ~{potentialSavings} kWh
+            Potential savings by maintaining {formatKwhPer100Km(avgEfficiency - 20)}: ~{potentialSavings} kWh
           </div>
         </div>
       </div>

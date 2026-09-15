@@ -12,6 +12,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ProgressBar } from '@/components/ui/charts'
 import { cn } from '@/lib/utils'
+import { formatKwhPer100Km } from '@/lib/format'
 
 function WidgetFrame({
   title,
@@ -111,7 +112,7 @@ export function LastTripWidget({
             {distance.toFixed(1)} km
           </div>
           <p className="mt-2 text-sm text-ink-secondary">
-            Average efficiency landed at {efficiency.toFixed(0)} Wh/km for the most recent drive.
+            Average efficiency landed at {formatKwhPer100Km(efficiency)} for the most recent drive.
           </p>
         </div>
         <div className="rounded-2xl border border-line bg-surface-muted p-4">
@@ -192,10 +193,10 @@ export function EfficiencyWidget({
         <div className="flex items-end justify-between gap-4">
           <div>
             <div className="font-mono text-4xl font-semibold tracking-[-0.04em] text-ink">
-              {current} Wh/km
+              {formatKwhPer100Km(current)}
             </div>
             <p className="mt-2 text-sm text-ink-secondary">
-              Fleet baseline for your recent driving is {average} Wh/km.
+              Fleet baseline for your recent driving is {formatKwhPer100Km(average)}.
             </p>
           </div>
           <div
@@ -214,13 +215,13 @@ export function EfficiencyWidget({
             <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">
               Current
             </div>
-            <div className="mt-2 text-lg font-semibold text-ink">{current} Wh/km</div>
+            <div className="mt-2 text-lg font-semibold text-ink">{formatKwhPer100Km(current)}</div>
           </div>
           <div className="rounded-2xl border border-line p-4">
             <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">
               Average
             </div>
-            <div className="mt-2 text-lg font-semibold text-ink">{average} Wh/km</div>
+            <div className="mt-2 text-lg font-semibold text-ink">{formatKwhPer100Km(average)}</div>
           </div>
         </div>
       </div>

@@ -7,7 +7,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { PanelSkeleton } from '@/components/dashboard/vehicle-panels'
 import { useFeed } from '@/components/shell/app-shell'
 import type { BatterySnapshot } from '@/lib/tesla/models'
-import { formatEfficiency, formatKm, formatPercent, formatTempCelsius } from '@/lib/format'
+import { formatKm, formatKwhPer100Km, formatPercent, formatTempCelsius } from '@/lib/format'
 
 const RANGES = [
   { value: '24h', label: '24h' },
@@ -101,7 +101,7 @@ export default function BatteryPage() {
           <Figure label="Highest SOC" value={formatPercent(values.length ? Math.max(...values) : null)} />
           <Figure label="Snapshots" value={String(snapshots.length)} />
           <Figure label="Charging Events" value={String(charging)} />
-          <Figure label="Avg Efficiency" value={formatEfficiency(efficiencyFrom(snapshots))} />
+          <Figure label="Avg Efficiency" value={formatKwhPer100Km(efficiencyFrom(snapshots))} />
         </dl>
       </section>
     </div>

@@ -163,7 +163,7 @@ export function TripsTable({
     {
       key: 'efficiency',
       label: 'Efficiency',
-      render: (value) => value == null ? '—' : `${(value as number).toFixed(0)} Wh/km`,
+      render: (value) => value == null ? '—' : `${((value as number) / 10).toFixed(1)} kWh/100 km`,
       width: 'w-28',
     },
     {

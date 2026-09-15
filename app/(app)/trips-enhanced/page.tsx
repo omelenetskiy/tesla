@@ -10,6 +10,7 @@ import { Button, Card, Badge } from '@/components/ui/primitives'
 import { Trip, TripsTable } from '@/components/ui/table'
 import { usePagination, useTrips } from '@/lib/hooks/use-data'
 import { calculateTripStats, TripStatInput } from '@/lib/utils/stats'
+import { formatKwhPer100Km } from '@/lib/format'
 
 type DateRange = '7d' | '30d' | '90d' | '1y'
 type SortBy = 'date' | 'distance' | 'efficiency'
@@ -105,7 +106,7 @@ export default function TripsPage() {
           </div>
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">Avg efficiency</div>
-            <div className="mt-2 font-mono text-2xl font-semibold tracking-[-0.03em] text-ink">{stats.avgEfficiency} Wh/km</div>
+            <div className="mt-2 font-mono text-2xl font-semibold tracking-[-0.03em] text-ink">{formatKwhPer100Km(stats.avgEfficiency)}</div>
           </div>
           <div>
             <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">Avg distance</div>
@@ -117,7 +118,7 @@ export default function TripsPage() {
       <MetricsSummary
         metrics={[
           { label: 'Total distance', value: stats.totalDistance, unit: 'km' },
-          { label: 'Avg efficiency', value: stats.avgEfficiency, unit: 'Wh/km' },
+          { label: 'Avg efficiency', value: formatKwhPer100Km(stats.avgEfficiency), unit: undefined },
           { label: 'Max speed', value: stats.maxSpeed, unit: 'km/h' },
         ]}
       />

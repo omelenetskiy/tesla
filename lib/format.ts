@@ -155,3 +155,8 @@ export function completenessNote(filled: number, total: number): string | null {
   if (total <= 0 || filled >= total) return null
   return `${total - filled} of ${total} values unavailable`
 }
+/** Display-only conversion from numeric Wh/km to kWh/100 km. */
+export function formatKwhPer100Km(whPerKm: number | null | undefined): string {
+  if (whPerKm === null || whPerKm === undefined || !Number.isFinite(whPerKm)) return DASH
+  return `${number(whPerKm / 10, 1)} kWh/100 km`
+}

@@ -83,7 +83,7 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatsWidget label="Total distance" value="5,432" unit="km" icon="Road" />
         <StatsWidget label="Sessions" value="24" icon="Grid" />
-        <StatsWidget label="Avg efficiency" value="218" unit="Wh/km" icon="Energy" />
+        <StatsWidget label="Avg efficiency" value="21.8" unit="kWh/100 km" icon="Energy" />
         <StatsWidget label="Last charge" value="2h" icon="Recent" />
       </div>
 

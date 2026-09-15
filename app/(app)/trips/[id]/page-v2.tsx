@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { Card, Badge } from '@/components/ui/primitives'
 import { LineChart, MetricsSummary, TimelineChart } from '@/components/ui/charts'
 import { LoadingState, EmptyState, Alert } from '@/components/ui/forms'
+import { formatKwhPer100Km } from '@/lib/format'
 
 const TripMap = dynamic(() => import('@/components/map').then((mod) => ({ default: mod.TripMap })), {
   loading: () => <div className="h-96 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />,
@@ -136,7 +137,7 @@ export default function TripDetailPageV2({ params }: PageProps) {
       <MetricsSummary
         metrics={[
           { label: 'Distance', value: trip.distance == null ? unavailable : trip.distance.toFixed(1), unit: trip.distance == null ? undefined : 'km' },
-          { label: 'Efficiency', value: trip.efficiency == null ? unavailable : trip.efficiency.toFixed(0), unit: trip.efficiency == null ? undefined : 'Wh/km' },
+          { label: 'Efficiency', value: trip.efficiency == null ? unavailable : formatKwhPer100Km(trip.efficiency), unit: undefined },
           { label: 'Energy Used', value: trip.energyUsedKwh == null ? unavailable : trip.energyUsedKwh.toFixed(2), unit: trip.energyUsedKwh == null ? undefined : 'kWh' },
           { label: 'Max Speed', value: trip.maxSpeed == null ? unavailable : trip.maxSpeed.toFixed(0), unit: trip.maxSpeed == null ? undefined : 'km/h' },
           { label: 'Avg Speed', value: trip.avgSpeed == null ? unavailable : trip.avgSpeed.toFixed(0), unit: trip.avgSpeed == null ? undefined : 'km/h' },

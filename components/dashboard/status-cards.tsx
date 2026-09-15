@@ -9,7 +9,7 @@ import type { ChargingConnection, Connectivity, Trip, VehiclePresence, VehicleSt
 import type { PlaceLabel } from '@/lib/geo/place'
 import { useGeolocation } from '@/lib/hooks/use-geolocation'
 import { anyPartOpen } from '@/lib/tesla/models'
-import { DASH, formatAge, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration, formatPsi, formatEfficiency } from '@/lib/format'
+import { DASH, formatAge, formatDateTimeShort, formatDistanceShort, formatKmh, formatKw, formatKwh, formatPercent, formatTempCelsius, formatVolts, formatAmps, formatDuration, formatPsi, formatKwhPer100Km } from '@/lib/format'
 import { TIRE_HIGH_PSI, TIRE_LOW_PSI } from '@/lib/tesla/alerts'
 import { cn } from '@/lib/utils'
 
@@ -525,8 +525,8 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
     <Card icon={Timer} title="Energy" aside={series.length > 1 ? <span>{series.length} recent trips</span> : undefined}>
       <Figure
         size="lg"
-        value={last === null ? DASH : (Math.round(last)).toString()}
-        unit="Wh/km"
+        value={formatKwhPer100Km(last).replace(" kWh/100 km", "")}
+        unit="kWh/100 km"
         label={newest && last !== null ? `Last completed trip · ${formatDateTimeShort(newest.endedAt)}` : 'No completed trip measured yet'}
       />
       <div className="mt-2">
@@ -536,7 +536,7 @@ export function EnergyCard({ trips }: { trips: Trip[] }) {
         <p className="text-[11.5px] leading-4 text-ink-tertiary">Consumption is measured per trip, from the energy the pack lost over the distance driven.</p>
       ) : (
         <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-2 text-[11.5px] text-ink-tertiary">
-          <span>{average === null ? 'Average unavailable' : `${formatEfficiency(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
+          <span>{average === null ? 'Average unavailable' : `${formatKwhPer100Km(average)} average over ${measured.length} trip${measured.length === 1 ? '' : 's'}`}</span>
           {newest.distanceKm != null && <span>{formatDistanceShort(newest.distanceKm)} on the last one</span>}
         </div>
       )}
