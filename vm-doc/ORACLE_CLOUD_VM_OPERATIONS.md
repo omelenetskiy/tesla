@@ -1,10 +1,10 @@
 # DriveScope VM Operations Guide
 
-Подробная инструкция по подключению к Oracle Cloud VM, деплою приложения, работе telemetry receiver, PM2, Docker, Supabase migrations и проверке результата.
+This is the authoritative instruction for an LLM agent operating the DriveScope Oracle Cloud VM: SSH access, deployment, process management, Docker telemetry, migrations, backfill, verification, rollback, and safe troubleshooting.
 
-> **Текущая topology:** frontend и Tesla Fleet Telemetry работают на одной Oracle VM. Netlify не используется.
+> **Current topology:** the frontend and Tesla Fleet Telemetry receiver run on one Oracle VM. Netlify is not used.
 
-## 1. Архитектура
+## 1. Architecture
 
 ```text
 Internet
@@ -47,6 +47,32 @@ Internet
 | Ingest process | PM2 `TeslaTelemetryIngest` |
 | Telemetry receiver | Docker `fleet-telemetry` |
 | Command proxy | Docker `vehicle-command-proxy` |
+
+## 1.1 Authoritative domain and port matrix
+
+The public domains must point to the VM public IP `130.61.30.119`.
+
+| Domain / endpoint | DNS target | Public port | VM listener / destination | Owner | Purpose |
+|---|---:|---:|---|---|---|
+| `app.omelenetskiy.xyz` | `130.61.30.119` | TCP 443 | nginx TLS vhost → `127.0.0.1:3000` | PM2 `TeslaApp` / Next.js | Main web application, login, API routes |
+| `app.omelenetskiy.xyz` | `130.61.30.119` | TCP 80 | nginx HTTP vhost | nginx | HTTP handling/redirects; HTTPS is canonical |
+| `app.omelenetskiy.xyz/.well-known/appspecific/com.tesla.3p.public-key.pem` | `130.61.30.119` | TCP 443 | nginx/static public file | nginx/static file | Tesla virtual-key public key; must return `200`, never app login |
+| `telemetry.omelenetskiy.xyz` | `130.61.30.119` | TCP 443 | nginx SNI route → `127.0.0.1:8443` | Docker `fleet-telemetry` | Tesla Fleet Telemetry HTTPS/mTLS receiver |
+| `telemetry.omelenetskiy.xyz` | `130.61.30.119` | TCP 80 | nginx HTTP vhost | nginx | HTTP handling for telemetry host; do not use as the receiver protocol |
+| `fleet-telemetry` internal | not public | TCP 8443 | Docker/container listener on `127.0.0.1:8443` | Docker `fleet-telemetry` | Internal TLS target for nginx SNI routing |
+| `fleet-telemetry` internal | not public | TCP 9090 | Docker/container metrics listener | Docker `fleet-telemetry` | Prometheus/metrics endpoint; do not expose publicly |
+| `fleet-telemetry` internal | not public | TCP 4269 | Docker/container profiler listener | Docker `fleet-telemetry` | Profiling/debug listener; do not expose publicly |
+| `vehicle-command-proxy` internal | not public | TCP 4443 | Docker listener, currently published by compose | Docker `vehicle-command-proxy` | Fleet vehicle-command HTTPS proxy; never route the public app domain here |
+| Next.js internal | not public | TCP 3000 | `127.0.0.1:3000` | PM2 `TeslaApp` | Internal application server; nginx is the public entrypoint |
+
+### DNS requirements
+
+```text
+app.omelenetskiy.xyz       A 130.61.30.119
+telemetry.omelenetskiy.xyz A 130.61.30.119
+```
+
+Do not point either production domain to Netlify. Do not expose ports `3000`, `4269`, `4443`, `8443`, or `9090` directly to the Internet. Public traffic must enter through nginx on ports `80`/`443`.
 
 ## 2. SSH access
 
