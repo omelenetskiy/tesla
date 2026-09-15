@@ -384,5 +384,5 @@ For issues, check:
 1. `/logs/` directory for deployment logs
 2. `pm2 logs TeslaApp` for app errors
 3. `docker-compose logs fleet-telemetry` for receiver errors
-4. `docs/AGENT_TESLA_FLEET_TELEMETRY_RUNBOOK.md` for telemetry setup
+4. `AGENT_TESLA_FLEET_TELEMETRY_RUNBOOK.md` for telemetry setup
 

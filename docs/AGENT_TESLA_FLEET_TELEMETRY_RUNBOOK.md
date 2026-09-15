@@ -164,7 +164,7 @@ These points were re-checked against current Tesla Fleet API / Fleet Telemetry d
 Directory: `/Users/Aleksandr_Omelenetskiy/Projects/Tesla/TeslaApp/deploy/fleet-telemetry`
 
 Relevant files:
-- `README.md` — local setup guide
+- `FLEET_TELEMETRY_README.md` — local setup guide
 - `config.local.json` — telemetry server config
 - `docker-compose.yml` — telemetry server + vehicle-command proxy
 - `cloudflared.yml` — raw TLS passthrough example

@@ -35,3 +35,6 @@ keys/
 
 # Local Netlify folder
 .netlify
+
+# Consolidated project documentation (tracked files are explicitly force-added)
+docs/
